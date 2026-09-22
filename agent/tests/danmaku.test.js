@@ -88,12 +88,7 @@ test('combat entry emits only Mod monster keywords without atmosphere retrieval'
   });
   await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
   assert.equal(retrievals, 0);
-  assert.deepEqual(adapter.director.queue.map(item => item.text), [
-    '第1回合。',
-    '帝皇蟹当前生命 20/20。',
-    '帝皇蟹试图攻击你。'
-  ]);
-  assert.equal(adapter.director.queue.every(item => item.source === 'mod'), true);
+  assert.deepEqual(adapter.director.queue, []);
   assert.equal(adapter.director.queue.some(item => /进入战斗|出场|围观|来了/.test(item.text)), false);
 });
 
@@ -102,7 +97,7 @@ test('combat entry appends multiple natural Codex facts when monster ID is known
   const input = state();
   input.combat.enemies = [{ id: 'AEONGLASS', name: '永世沙漏', hp: 20, maxHp: 20, block: 0, intent: 'AttackIntent', alive: true }];
   await adapter.ingestObservation(observation(1, input), { runId: 'run' });
-  assert.equal(adapter.director.queue.some(item => item.text === '永世沙漏试图攻击你。' && item.source === 'mod'), true);
+  assert.equal(adapter.director.queue.some(item => item.text.includes('永世沙漏会使用') && item.source === 'codex'), true);
   assert.equal(adapter.director.queue.some(item => /档案|标签|资料/.test(item.text)), false);
   assert.equal(adapter.director.queue.some(item => item.source === 'codex'), true);
 });

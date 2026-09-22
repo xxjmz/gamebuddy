@@ -822,12 +822,18 @@ public static class GameBuddyExporter
     private static EnemySnapshot MapEnemy(Creature enemy)
     {
         var intent = "none";
-        if (enemy.IsMonster && enemy.Monster?.NextMove is not null)
+        string? nextMoveId = null;
+        string? nextMoveName = null;
+        if (enemy.IsMonster && enemy.Monster?.NextMove is { } nextMove)
         {
-            intent = string.Join(" | ", enemy.Monster.NextMove.Intents.Select(item => item.GetType().Name));
+            intent = string.Join(" | ", nextMove.Intents.Select(item => item.GetType().Name));
+            // NextMove metadata varies between early-access builds. Read it best-effort,
+            // and leave fields null rather than guessing a move from the intent.
+            nextMoveId = ReadTextMember(nextMove, "MoveId", "MoveID", "Id", "ActionId");
+            nextMoveName = ReadTextMember(nextMove, "MoveName", "DisplayName", "Title", "Name");
         }
 
-        return new EnemySnapshot(enemy.Monster?.Id.Entry, enemy.Name, enemy.CurrentHp, enemy.MaxHp, enemy.Block, intent, enemy.IsAlive);
+        return new EnemySnapshot(enemy.Monster?.Id.Entry, enemy.Name, enemy.CurrentHp, enemy.MaxHp, enemy.Block, intent, enemy.IsAlive, nextMoveId, nextMoveName);
     }
 }
 
@@ -840,7 +846,7 @@ public sealed record EventOptionSnapshot(int Index, string Label, string Descrip
 public sealed record RunSnapshot(int Act, int Floor, string? Room, string Character, int TotalFloor, string? CurrentNode, string? CurrentCoord, string ActId, string ActName, string? NextBossId, string? NextBoss, string? SecondBossId, string? SecondBoss);
 public sealed record PlayerSnapshot(int Hp, int MaxHp, int Block, int Gold, int Energy, int MaxEnergy, List<CardSnapshot> Cards, List<OwnedItemSnapshot> Relics, List<OwnedItemSnapshot> Potions);
 public sealed record CombatSnapshot(int Turn, List<CardSnapshot> Hand, List<CardSnapshot> DrawPile, List<CardSnapshot> DiscardPile, List<CardSnapshot> ExhaustPile, List<EnemySnapshot> Enemies);
-public sealed record EnemySnapshot(string? Id, string Name, int Hp, int MaxHp, int Block, string? Intent, bool Alive);
+public sealed record EnemySnapshot(string? Id, string Name, int Hp, int MaxHp, int Block, string? Intent, bool Alive, string? NextMoveId, string? NextMoveName);
 public sealed record CardSnapshot(
     string Id,
     string Name,

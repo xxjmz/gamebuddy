@@ -17,18 +17,31 @@ The companion SHALL derive a language profile from the Mod-provided character, r
 - **THEN** the companion MUST use generic compatible wording
 - **AND** MUST NOT suppress Mod-fact messages
 
-### Requirement: Monster facts and Codex knowledge are rendered naturally
-The companion SHALL retain Mod-provided monster IDs and use them to match existing local Codex knowledge. It MUST render real-time intent and accepted Codex mechanism information as natural Chinese sentences, without visible implementation/source labels such as “档案”, “标签” or “资料”. It MUST retain the actual source internally and MUST NOT turn Codex knowledge into a card or action recommendation.
+### Requirement: Monster knowledge is rendered without duplicating game UI
+The companion SHALL retain Mod-provided monster IDs and use them to match existing local Codex knowledge. It MUST render Codex-only monster knowledge naturally, without visible implementation/source labels such as “档案”, “标签” or “资料”. It MUST NOT render player health, player damage, enemy health, block, generic attack-intent, turn counter, or action-cycle text that the game UI already exposes.
 
-#### Scenario: Current attack intent is expressed naturally
-- **WHEN** a named alive enemy has a normalized attack intent
-- **THEN** the companion SHALL render a natural fact sentence equivalent to “{enemyName}试图攻击你。”
-- **AND** MUST NOT show a machine-style `enemyName · 攻击意图` label
+#### Scenario: First encounter shows known move overview
+- **WHEN** a Mod enemy ID matches local Codex move data on first encounter
+- **THEN** the companion SHALL render a natural overview of the known move names
+- **AND** MUST NOT render an action-cycle sentence
 
 #### Scenario: Codex mechanism is available
 - **WHEN** the Mod enemy ID matches local Codex mechanism data
 - **THEN** the companion SHALL render up to three distinct natural, non-strategic mechanism reminders when compatible facts exist
 - **AND** MUST NOT expose the internal data-source label or recommend a card/action
+
+### Requirement: Current enemy move is rendered with hoverable knowledge detail
+The Mod SHALL expose a best-effort current enemy move identifier and display name in addition to its existing intent. When the identifier changes and matches Codex move data, the companion SHALL render only the move name as danmaku and attach the full known move detail for hover display. It MUST omit the message when the move cannot be identified rather than guessing from intent.
+
+#### Scenario: A known current move changes
+- **WHEN** a current enemy move ID changes and matches a local Codex move
+- **THEN** the overlay SHALL render the move name
+- **AND** hovering that message SHALL show its known effect, damage, hit count, block, heal and description when available
+
+#### Scenario: Current move is unavailable
+- **WHEN** the Mod cannot expose a move ID/name or Codex cannot match it
+- **THEN** the companion MUST NOT infer the move from intent alone
+- **AND** MUST NOT emit a generic attack-intent danmaku
 
 ### Requirement: Recommendation status does not create generic danmaku
 The companion MUST NOT render generic recommendation-status wording such as “建议更新”, “辅助建议到了” or “方案已就位”. An upstream recommendation remains available to its existing UI, but MUST NOT create a danmaku wave without a current Mod fact trigger.
@@ -48,7 +61,7 @@ The companion SHALL select atmosphere wording using a compatible scene trigger, 
 
 #### Scenario: Explicit entry facts remain dominant
 - **WHEN** a combat scene is newly entered
-- **THEN** the overlay MUST show at least three related Mod/Codex facts, including the current turn, enemy health/block or intent when provided
+- **THEN** the overlay MUST show only available Codex move/ability knowledge for the encountered monsters
 - **AND** MUST NOT add character phrases, corpus atmosphere phrases, LLM phrases or recommendation wording to that entry wave
 
 ### Requirement: Significant non-entry scenes produce a high-density bounded wave

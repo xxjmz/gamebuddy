@@ -17,6 +17,19 @@ function showDanmaku(message) {
   item.className = `danmaku-item ${message.style === 'tense' ? 'tense' : ''}`;
   item.style.setProperty('--danmaku-lane', String(Math.max(0, Math.min(4, Number(message.lane) || 0))));
   item.textContent = String(message.text).slice(0, 80);
+  if (message.detail?.title || message.detail?.lines?.length) {
+    const detail = document.createElement('span');
+    detail.className = 'danmaku-detail';
+    const title = document.createElement('strong');
+    title.textContent = String(message.detail.title || message.text).slice(0, 100);
+    detail.append(title);
+    for (const line of message.detail.lines || []) {
+      const row = document.createElement('span');
+      row.textContent = String(line).slice(0, 180);
+      detail.append(row);
+    }
+    item.append(detail);
+  }
   layer.append(item);
   const duration = Math.max(1200, Number(message.durationMs) || 4200);
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;

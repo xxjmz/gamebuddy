@@ -6,11 +6,21 @@ const { DanmakuLlmAtmosphere, cleanPhrase } = require('../danmaku/llm-atmosphere
 const { DanmakuBridgeAdapter } = require('../danmaku/bridge-adapter');
 const { SPECIALTY_PHRASES } = require('../danmaku/catalog');
 
-function state(intent) {
+function state(nextMoveId, nextMoveName) {
   return {
     run: { character: 'ironclad', room: 'combat' },
     player: { hp: 60, maxHp: 80, energy: 3, block: 0 },
-    combat: { turn: 1, enemies: [{ name: '帝皇蟹', intent, alive: true }] }
+    combat: {
+      turn: 1,
+      enemies: [{
+        id: 'AEONGLASS',
+        name: '永世沙漏',
+        intent: 'AttackIntent',
+        nextMoveId,
+        nextMoveName,
+        alive: true
+      }]
+    }
   };
 }
 
@@ -43,14 +53,14 @@ test('LLM failure falls back without throwing', async () => {
   assert.deepEqual(await generator.generate({ trigger: 'attack', tone: 'tense', sceneTags: ['attack'] }), []);
 });
 
-test('LLM phrases append asynchronously without delaying attack facts', async () => {
+test('known current move renders only its name with Codex detail', async () => {
   const adapter = new DanmakuBridgeAdapter({
-    retriever: { retrieve: async () => [] },
-    llmAtmosphere: { generate: async () => [{ text: '镜头别切，继续看', source: 'llm_atmosphere', memeFamily: 'llm' }] }
+    retriever: { retrieve: async () => [] }
   });
-  await adapter.ingestObservation(observation(1, state('BuffIntent')), { runId: 'run' });
-  await adapter.ingestObservation(observation(2, state('AttackIntent')), { runId: 'run' });
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(adapter.director.queue.some(item => item.text === '帝皇蟹试图攻击你。' && item.source === 'mod'), true);
-  assert.equal(adapter.director.queue.some(item => item.text === '镜头别切，继续看' && item.source === 'llm_atmosphere'), true);
+  await adapter.ingestObservation(observation(1, state('EBB', '消退')), { runId: 'run' });
+  await adapter.ingestObservation(observation(2, state('EYE_LASERS', '眼部激光')), { runId: 'run' });
+  const move = adapter.director.queue.find(item => item.text === '眼部激光');
+  assert.equal(move.source, 'mod');
+  assert.equal(move.detail.title, '眼部激光');
+  assert.equal(move.detail.moveId, 'EYE_LASERS');
 });

@@ -122,6 +122,7 @@ class DanmakuDirector {
       ...this.context, generation: this.generation, trigger: event.trigger, text,
       sourceEventIds: [event.eventId], recommendationId: event.recommendationId || null,
       recommendation: event.recommendation || null,
+      detail: event.detailByText?.[text] || event.detail || sourceByText.get(text)?.detail || null,
       wordingSource: sourceByText.get(text) || (factTexts.includes(text)
         ? { type: 'mod_fact', source: 'mod' }
         : { type: 'original_template', source: 'original' }),

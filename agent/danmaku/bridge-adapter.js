@@ -4,7 +4,7 @@ const { DanmakuDirector, sameContext } = require('./director');
 const { DanmakuRetriever } = require('./retrieval');
 const { extractSceneContext, factLines } = require('./scene-context');
 const { specialtyCandidates } = require('./catalog');
-const { codexFactCandidates } = require('./codex-facts');
+const { codexFactCandidates, currentMoveDetail } = require('./codex-facts');
 
 class DanmakuBridgeAdapter {
   constructor({ retriever = new DanmakuRetriever(), llmAtmosphere = null, ...directorOptions } = {}) {
@@ -120,15 +120,8 @@ class DanmakuBridgeAdapter {
     this.director.setContext(this.scope);
     const sceneContext = extractSceneContext({ state });
     const names = sceneContext.enemyNames;
-    const ratio = state.player?.maxHp > 0 && Number.isFinite(state.player?.hp)
-      ? state.player.hp / state.player.maxHp : null;
-    const previousRatio = previous?.player?.maxHp > 0 && Number.isFinite(previous?.player?.hp)
-      ? previous.player.hp / previous.player.maxHp : null;
     if (entering) {
       const entryFacts = factLines(extractSceneContext({ state, trigger: 'entry' }));
-      if (ratio !== null && ratio <= 0.25) {
-        entryFacts.push(...factLines(extractSceneContext({ state, trigger: 'low_hp' })));
-      }
       return this.emit('entry', {
         enemyNames: names,
         key: 'entry',
@@ -137,22 +130,23 @@ class DanmakuBridgeAdapter {
         factTexts: entryFacts
       });
     }
-    if (ratio !== null && ratio <= 0.25 && (previousRatio === null || previousRatio > 0.25)) {
-      return this.emit('low_hp', {
+    const previousMoves = new Map(extractSceneContext({ state: previous }).enemies
+      .map(enemy => [enemy.id || enemy.name, enemy.nextMoveId || enemy.nextMoveName]));
+    const changedMoves = sceneContext.enemies
+      .filter(enemy => (enemy.nextMoveId || enemy.nextMoveName)
+        && (enemy.nextMoveId || enemy.nextMoveName) !== previousMoves.get(enemy.id || enemy.name))
+      .map(enemy => ({ enemy, detail: currentMoveDetail(enemy) }))
+      .filter(item => item.detail);
+    if (changedMoves.length) {
+      const detailByText = Object.fromEntries(changedMoves.map(item => [item.detail.title, item.detail]));
+      return this.emit('enemy_move', {
+        key: changedMoves.map(item => item.detail.moveId).join('|'),
         priority: 3,
-        key: 'first_low',
-        factTexts: factLines(extractSceneContext({ state, trigger: 'low_hp' }))
+        factOnly: true,
+        factTexts: changedMoves.map(item => item.detail.title),
+        detailByText
       });
     }
-    if (Number.isFinite(previous?.player?.hp) && Number.isFinite(state.player?.hp) && state.player.hp < previous.player.hp) {
-      return this.emit('hp_drop', {
-        turn: state.combat.turn,
-        previousHp: previous.player.hp
-      });
-    }
-    const attacking = sceneContext.attackEnemyNames.length > 0;
-    const wasAttacking = extractSceneContext({ state: previous }).attackEnemyNames.length > 0;
-    if (attacking && !wasAttacking) return this.emit('attack', { turn: state.combat.turn, priority: 3 });
     return { accepted: false, reason: 'no_new_trigger' };
   }
 

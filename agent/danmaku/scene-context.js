@@ -45,7 +45,9 @@ function extractSceneContext({ state = {}, trigger, event } = {}) {
       intent: normalizeIntent(enemy?.intent),
       hp: Number.isFinite(enemy?.hp) ? enemy.hp : null,
       maxHp: Number.isFinite(enemy?.maxHp) ? enemy.maxHp : null,
-      block: Number.isFinite(enemy?.block) ? enemy.block : null
+      block: Number.isFinite(enemy?.block) ? enemy.block : null,
+      nextMoveId: cleanText(enemy?.nextMoveId),
+      nextMoveName: cleanText(enemy?.nextMoveName)
     }))
     .filter(enemy => enemy.name);
   const playerHp = Number.isFinite(player.hp) ? player.hp : null;
@@ -85,29 +87,11 @@ function extractSceneContext({ state = {}, trigger, event } = {}) {
 function factLines(context, { previousHp, event } = {}) {
   const trigger = context?.trigger;
   if (trigger === 'entry') {
-    const lines = [];
-    if (Number.isInteger(context.turn)) lines.push(`第${context.turn}回合。`);
-    for (const enemy of context.enemies || []) {
-      if (enemy.hp !== null && enemy.maxHp !== null) lines.push(`${enemy.name}当前生命 ${enemy.hp}/${enemy.maxHp}。`);
-      if (enemy.block > 0) lines.push(`${enemy.name}有 ${enemy.block} 点格挡。`);
-      if (enemy.intent === 'attack') lines.push(`${enemy.name}试图攻击你。`);
-      if (enemy.intent === 'buff') lines.push(`${enemy.name}正在强化。`);
-      if (enemy.intent === 'block') lines.push(`${enemy.name}准备防守。`);
-      if (enemy.intent === 'debuff') lines.push(`${enemy.name}准备施加减益。`);
-    }
-    if (lines.length < 3 && context.playerHp !== null && context.playerMaxHp !== null) {
-      lines.push(`你的生命 ${context.playerHp}/${context.playerMaxHp}。`);
-    }
-    if (lines.length < 3 && context.energy !== null) lines.push(`你有 ${context.energy} 点能量。`);
-    return [...new Set(lines)];
+    return [];
   }
-  if (trigger === 'attack') return context.attackEnemyNames.map(name => `${name}试图攻击你。`);
-  if (trigger === 'low_hp' && context.playerHp !== null && context.playerMaxHp !== null) {
-    return ['你的生命偏低。'];
-  }
-  if (trigger === 'hp_drop' && Number.isFinite(previousHp) && context.playerHp !== null) {
-    return ['你受伤了。'];
-  }
+  if (trigger === 'enemy_move') return context.enemies
+    .filter(enemy => enemy.nextMoveName)
+    .map(enemy => enemy.nextMoveName);
   if (trigger === 'card_played' && context.cardName) return [`已使用「${context.cardName}」。`];
   if (trigger === 'mechanic') {
     const name = cleanText(event?.name);

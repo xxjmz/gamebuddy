@@ -23,7 +23,7 @@ test('scene context uses only explicit Mod fields', () => {
   assert.equal(context.characterKey, 'ironclad');
   assert.equal(context.tone, 'tense');
   assert.equal(context.sceneTags.includes('attack-intent'), true);
-  assert.deepEqual(factLines(context), ['树枝史莱姆（小）试图攻击你。']);
+  assert.deepEqual(factLines(context), []);
 });
 
 test('unknown character uses the generic language profile', () => {
@@ -47,14 +47,14 @@ test('unknown enemy names get an entry fact without a catalog lookup', () => {
     },
     trigger: 'entry'
   });
-  assert.deepEqual(factLines(context), ['第1回合。', '新怪物正在强化。', '你的生命 80/80。']);
+  assert.deepEqual(factLines(context), []);
 });
 
 test('health changes use concise fact keywords without numeric advice', () => {
   const lowContext = extractSceneContext({ state: { ...state, player: { ...state.player, hp: 10 } }, trigger: 'low_hp' });
   const dropContext = extractSceneContext({ state: { ...state, player: { ...state.player, hp: 50 } }, trigger: 'hp_drop' });
-  assert.deepEqual(factLines(lowContext), ['你的生命偏低。']);
-  assert.deepEqual(factLines(dropContext, { previousHp: 80 }), ['你受伤了。']);
+  assert.deepEqual(factLines(lowContext), []);
+  assert.deepEqual(factLines(dropContext, { previousHp: 80 }), []);
 });
 
 test('card-played fact uses the explicit event card name', () => {
@@ -75,7 +75,7 @@ test('Codex keeps several concrete monster details for entry waves', () => {
   const facts = codexFactCandidates([{ id: 'SHRINKER_BEETLE', name: '缩小甲虫' }]);
   assert.deepEqual(facts.map(item => item.text), [
     '缩小甲虫会使用缩小、大啃、践踏。',
-    '缩小甲虫会在这些招式间循环行动。',
-    '缩小甲虫会在战斗中逐渐变强。'
+    '缩小甲虫会在战斗中逐渐变强。',
+    '大啃的基础伤害为 7。'
   ]);
 });
