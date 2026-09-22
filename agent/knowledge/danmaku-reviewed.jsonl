@@ -1,0 +1,4 @@
+{"id":"bili-BV1Bp411R7UT-972630","text":"来了","triggers":["entry","elite","boss"],"tone":"warm","safe":true,"bvid":"BV1Bp411R7UT","atSeconds":972.63}
+{"id":"bili-BV1i8ExzYEyY-319101","text":"好好好","triggers":["victory"],"tone":"excited","safe":true,"bvid":"BV1i8ExzYEyY","atSeconds":319.101}
+{"id":"bili-BV1jP4y1271A-288999","text":"好耶","triggers":["victory"],"tone":"excited","safe":true,"bvid":"BV1jP4y1271A","atSeconds":288.999}
+{"id":"bili-BV1jP4y1271A-294","text":"加油","triggers":["entry","elite","boss","low_hp"],"tone":"warm","safe":true,"bvid":"BV1jP4y1271A","atSeconds":0.294}

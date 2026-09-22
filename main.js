@@ -8,18 +8,23 @@ const { ensureMapRoutes, routeChoiceCount } = require('./agent/tasks/route');
 const { decide } = require('./agent/router');
 const { recordDecision } = require('./agent/recorder');
 const { encounterGuideSignature, buildEncounterGuide } = require('./agent/tasks/encounter-guide');
+const { DanmakuBridgeAdapter } = require('./agent/danmaku/bridge-adapter');
+const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
 const fs = require('node:fs');
 
 const BRIDGE_URL = process.env.GAMEBUDDY_BRIDGE_URL || 'ws://127.0.0.1:27182';
 const BRIDGE_MODE = process.env.GAMEBUDDY_BRIDGE_MODE === 'replay' ? 'replay' : 'game';
 let mainWindow;
 let petWindow;
+let danmakuWindow;
 let tray;
 let bridgeSocket;
 let bridgeReconnectTimer;
 let isQuitting = false;
 let petHiddenByUser = false;
 let petTopmostTimer;
+let danmakuTimer;
+let danmakuHideTimer;
 let petDragState;
 let encounterGuideKey = '';
 let dismissedEncounterGuideKey = '';
@@ -36,6 +41,17 @@ const PET_POSES = ['waiting', 'watching', 'thinking', 'advising'];
 const PET_PREFERENCES_PATH = path.join(app.getPath('userData'), 'pet-preferences.json');
 const llmConfig = readLlmConfig();
 const baseLlmConfig = { ...llmConfig };
+const danmakuLlm = llmConfig.enabled
+  ? createOpenAiClient({
+      ...baseLlmConfig,
+      thinking: 'disabled',
+      temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
+      maxTokens: Math.min(baseLlmConfig.maxTokens || 180, 180)
+    }, { timeoutMs: 1500 })
+  : null;
+const danmakuAdapter = new DanmakuBridgeAdapter({
+  llmAtmosphere: new DanmakuLlmAtmosphere({ llm: danmakuLlm })
+});
 let llmThinkingEnabled = llmConfig.thinking !== 'disabled';
 if (llmConfig.enabled) {
   console.log(`GameBuddy LLM: ${llmConfig.model} · ${llmConfig.wireApi} · ${llmConfig.source}${llmConfig.providerName ? `/${llmConfig.providerName}` : ''}${llmThinkingEnabled ? ' · thinking on' : ' · thinking off'}`);
@@ -227,6 +243,49 @@ function broadcast(channel, payload) {
   }
 }
 
+function clearDanmaku() {
+  danmakuAdapter.invalidate();
+  clearTimeout(danmakuHideTimer);
+  if (danmakuWindow && !danmakuWindow.isDestroyed()) {
+    danmakuWindow.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
+    danmakuWindow.hide();
+  }
+}
+
+function hideDanmakuAfter(delayMs = 6500) {
+  clearTimeout(danmakuHideTimer);
+  danmakuHideTimer = setTimeout(() => {
+    if (danmakuWindow && !danmakuWindow.isDestroyed()) {
+      danmakuWindow.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
+      danmakuWindow.hide();
+    }
+  }, delayMs);
+}
+
+function flushDanmaku() {
+  let messages;
+  try {
+    messages = danmakuAdapter.director.tick();
+  } catch (error) {
+    // 弹幕是可选表达层，绝不能让一个异常素材影响主进程或真实 Mod 连接。
+    console.warn('[GameBuddy Danmaku] skipped invalid queued message:', error.message);
+    danmakuAdapter.invalidate();
+    return;
+  }
+  if (!messages.length || !danmakuWindow || danmakuWindow.isDestroyed()) return;
+  clearTimeout(danmakuHideTimer);
+  danmakuWindow.showInactive();
+  for (const message of messages) danmakuWindow.webContents.send('bridge-danmaku', message);
+}
+
+async function ingestCombatDanmaku(observation) {
+  if (!agentRunId || !observation?.state) return;
+  const result = await danmakuAdapter.ingestObservation(observation, { runId: agentRunId });
+  if (result.reason === 'non_combat') hideDanmakuAfter();
+  // 战斗建议仍由桌宠/主面板显示；弹幕只响应 Mod 事实和 Codex 事实，
+  // 避免“建议更新”“方案已就位”等泛化状态文案占据游戏画面。
+}
+
 function broadcastBridgeStatus(status, detail = '') {
   lastBridgeStatus = { status, detail, url: BRIDGE_URL, mode: BRIDGE_MODE };
   broadcast('bridge-status', lastBridgeStatus);
@@ -372,8 +431,18 @@ function setCardExpanded(expanded) {
 
 function handleAcceptedEvent(event) {
   if (!event) return;
+  void danmakuAdapter.ingestEvent({
+    name: event.name,
+    eventId: `bridge-event-${event.sequence || event.timestamp || Date.now()}`,
+    outcome: event.data?.outcome,
+    data: event.data,
+    cardName: event.data?.cardName || event.data?.card?.name
+  }).catch(error => console.warn('GameBuddy danmaku event skipped:', error.message));
   broadcast('bridge-event', event);
-  if (event.name === 'combat.ended') clearEncounterGuide();
+  if (event.name === 'combat.ended') {
+    clearEncounterGuide();
+    hideDanmakuAfter();
+  }
   if (['card.reward.closed', 'map.opened', 'combat.started', 'rest.closed', 'event.closed'].includes(event.name)) {
     clearCardRecommendation();
     clearAgentThinking('card_reward');
@@ -519,6 +588,7 @@ function connectBridge() {
         if (result.accepted) {
           if (!agentRunId) startAgentRun();
           const observation = currentObservation();
+          void ingestCombatDanmaku(observation).catch(error => console.warn('GameBuddy danmaku observation skipped:', error.message));
           const routableState = withRoutableState(observation.state);
           applyCharacterSkin(routableState?.run?.character);
           if (!routableState.combat && routeChoiceCount(routableState) <= 1) clearAgentThinking('map_route');
@@ -557,6 +627,7 @@ function connectBridge() {
     if (bridgeSocket === socket) bridgeSocket = null;
     clearEncounterGuide();
     clearCardRecommendation();
+    clearDanmaku();
     broadcastBridgeStatus('waiting', '等待本地 Mod Bridge');
     clearTimeout(bridgeReconnectTimer);
     bridgeReconnectTimer = setTimeout(connectBridge, 2500);
@@ -656,6 +727,7 @@ function createPetWindow() {
     const recommendation = orchestrator.getRecommendation();
     if (recommendation) petWindow.webContents.send('bridge-recommendation', recommendation);
     petWindow.webContents.send('bridge-agent-thinking', lastAgentThinking);
+    petWindow.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
     if (activeCardRecommendation) petWindow.webContents.send('bridge-card-recommendation', activeCardRecommendation);
     if (activeEncounterGuide) {
       syncPetWindowSize();
@@ -664,6 +736,41 @@ function createPetWindow() {
     publishEncounterGuideState();
   });
   petWindow.once('ready-to-show', () => petWindow.showInactive());
+}
+
+function syncDanmakuWindowBounds() {
+  if (!danmakuWindow || danmakuWindow.isDestroyed()) return;
+  danmakuWindow.setBounds(screen.getPrimaryDisplay().bounds);
+}
+
+function createDanmakuWindow() {
+  const { bounds } = screen.getPrimaryDisplay();
+  danmakuWindow = new BrowserWindow({
+    ...bounds,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    focusable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  danmakuWindow.setAlwaysOnTop(true, 'screen-saver');
+  danmakuWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  danmakuWindow.setIgnoreMouseEvents(true, { forward: true });
+  danmakuWindow.loadFile(path.join(__dirname, 'src', 'danmaku.html'));
+  danmakuWindow.webContents.on('did-finish-load', () => {
+    danmakuWindow?.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
+  });
+  danmakuWindow.on('closed', () => { danmakuWindow = undefined; });
 }
 
 function createTray() {
@@ -744,21 +851,27 @@ app.whenReady().then(() => {
   applyCharacterSkin(observationStore.getState()?.run?.character);
   createMainWindow();
   createPetWindow();
+  createDanmakuWindow();
   createTray();
   connectBridge();
   petTopmostTimer = setInterval(keepPetVisible, 1000);
+  danmakuTimer = setInterval(flushDanmaku, 100);
   bridgeHealthTimer = setInterval(() => {
     if (lastBridgeStatus.status === 'live' && !observationStore.getObservation().fresh) {
       broadcastBridgeStatus('stale', '已连接，但超过 5 秒没有新的游戏状态');
+      clearDanmaku();
     }
   }, 1000);
+  screen.on('display-metrics-changed', syncDanmakuWindowBounds);
+  screen.on('display-added', syncDanmakuWindowBounds);
+  screen.on('display-removed', syncDanmakuWindowBounds);
   app.on('activate', () => {
     if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
     mainWindow.show();
   });
 });
 
-app.on('before-quit', () => { isQuitting = true; clearTimeout(bridgeReconnectTimer); clearInterval(bridgeHealthTimer); clearInterval(petTopmostTimer); bridgeSocket?.close(); });
+app.on('before-quit', () => { isQuitting = true; clearTimeout(bridgeReconnectTimer); clearTimeout(danmakuHideTimer); clearInterval(bridgeHealthTimer); clearInterval(petTopmostTimer); clearInterval(danmakuTimer); bridgeSocket?.close(); });
 app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit();
 });

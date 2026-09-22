@@ -24,6 +24,11 @@ function parseTemperature(value) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function parsePositiveInteger(value) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 function parseAllowedTemperature(message) {
   const match = String(message || '').match(/only\s+([0-9]*\.?[0-9]+)\s+is allowed/i);
   if (!match) return null;
@@ -46,11 +51,48 @@ function chatCompletionsBody(config, system, user, temperature = resolveChatTemp
     ]
   };
   if (Number.isFinite(temperature)) body.temperature = temperature;
+  if (Number.isInteger(config.maxTokens)) body.max_tokens = config.maxTokens;
+  if (config.stream) body.stream = true;
   if (config.thinking) body.thinking = { type: config.thinking };
   if (/deepseek-v4-pro/i.test(String(config.model)) && config.reasoningEffort) {
     body.reasoning = { effort: config.reasoningEffort };
   }
   return body;
+}
+
+function parseStream(value) {
+  return ['true', '1', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+async function readSseText(response) {
+  if (!response.body) throw new Error('llm stream response has no body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  let finishReason = '';
+  const consume = line => {
+    if (!line.startsWith('data:')) return;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === '[DONE]') return;
+    let chunk;
+    try { chunk = JSON.parse(payload); } catch { return; }
+    const choice = chunk?.choices?.[0] || chunk?.data?.choices?.[0] || {};
+    finishReason = choice.finish_reason || finishReason;
+    const content = choice.delta?.content ?? choice.message?.content ?? chunk?.output_text ?? chunk?.text;
+    if (typeof content === 'string') text += content;
+  };
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop();
+    lines.forEach(consume);
+    if (done) break;
+  }
+  if (buffer) consume(buffer);
+  if (!text.trim()) throw new Error(`llm stream ended without final content${finishReason ? ` (${finishReason})` : ''}`);
+  return { choices: [{ message: { content: text } }] };
 }
 
 function readLlmConfig(env = process.env) {
@@ -65,6 +107,8 @@ function readLlmConfig(env = process.env) {
   const reasoningEffort = String(env.GAMEBUDDY_LLM_REASONING_EFFORT || 'xhigh').trim();
   const thinking = parseThinking(env.GAMEBUDDY_LLM_THINKING);
   const temperature = parseTemperature(env.GAMEBUDDY_LLM_TEMPERATURE);
+  const maxTokens = parsePositiveInteger(env.GAMEBUDDY_LLM_MAX_TOKENS);
+  const stream = parseStream(env.GAMEBUDDY_LLM_STREAM);
   const source = apiKey ? 'env' : '';
   return {
     enabled: Boolean(apiKey),
@@ -75,6 +119,8 @@ function readLlmConfig(env = process.env) {
     reasoningEffort,
     thinking,
     temperature,
+    maxTokens,
+    stream,
     store: false,
     source: apiKey ? (source || 'env') : '',
     providerName: env.GAMEBUDDY_LLM_PROVIDER || ''
@@ -151,7 +197,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
         error.status = response.status;
         throw error;
       }
-      return response.json();
+      return body.stream === true ? readSseText(response) : response.json();
     } finally {
       clearTimeout(timer);
     }
@@ -182,7 +228,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
     }
   }
 
-  async function completeJson(system, payload, task) {
+  async function completeJson(system, payload, task, raw = false) {
     if (!enabled) return null;
     const detail = { task, model: config.model, requestId: `${task}-${++requestSequence}` };
     const started = Date.now();
@@ -191,6 +237,8 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
       model: config.model,
       wireApi: config.wireApi,
       thinking: config.thinking || null,
+      stream: Boolean(config.stream),
+      maxTokens: config.maxTokens || null,
       timeoutMs: waitMs
     });
     emitLog(detail.requestId, task, 'system', '系统提示', system);
@@ -242,6 +290,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
         return null;
       }
       emitLog(detail.requestId, task, 'parsed', '解析结果', parsed);
+      if (raw) return parsed;
       return {
         index: Number(parsed.index),
         reason: typeof parsed.reason === 'string' ? parsed.reason : ''
@@ -275,6 +324,12 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
       '你是杀戮尖塔 2 的选牌顾问。逐张核对候选牌的知识库 rank、expertSummary、goodWhen、badWhen，再与实际完整牌组、升级状态、完整遗物效果、药水效果、金币、章节、生命、完整地图和敌人机制对照。每张牌的 costs 分别描述普通能量 energy/energyX 与星费 stars/starsX，source 标识 runtime、catalog 或 unavailable；不得把星费当作普通能量，也不得把 unavailable 猜成 0。descriptionSource=runtime 表示游戏实机文本，catalog 表示同版本目录回退；contextCompleteness=partial 时不得编造缺失效果、费用或数值。判断普通卡费和能否打出时只用 energyPerTurn / maxEnergy（每回合能量）；选牌发生在战斗外，不得把上一场残留能量说成这局费用，也不得因此把 3 费牌判成打不出。knownBoss 和 knownUpcomingElites 中 exact=true 的遭遇才是已确定身份；possibleBosses 和 possibleElites 只是当前区域的可能池，绝不能说成下一战确定会遇到。地图节点没有 encounterId/encounterName 时也不得猜测具体敌人。知识库评价只是单卡先验；条件不满足时必须降低价值，已有核心协同或能针对确定机制时应提高价值。候选 upgraded 为 true 或名称以 + 结尾时，必须按升级后效果评价；knowledgeEvaluation 的 rank/expertSummary 针对未升级版本，不得单独作为 SKIP 的充分理由。候选上的 trigger 是卡面触发条件，优先于 knowledgeEvaluation.goodWhen。若 trigger 是生成状态牌，必须按牌组里实际会生成伤口/灼伤等状态牌的能力判断（见 synergy 与 deck 描述），不得因为效果会生成充能球、或牌组充能球/集中偏少而否定。充能球种类只能依据该牌或遗物自己的 description/effect 和 orbGeneration：random 或「随机生成一个充能球」是任意种类，不得因为牌组另有电击或破损核心就说成只能生成闪电球；冷却剂按不同种类计数时，随机球可以贡献多种类，不能把随机球算作单一球种。允许选择 SKIP，避免为了拿牌而拿牌。只能从候选列表中选择，不能发明卡牌、遗物、药水、敌人、机制或数值。用 JSON 回答：{"index":0,"reason":"两句中文解释，说明当前局面满足或不满足哪些拿取条件，以及相对其他选项的优势"}。',
       payload,
       'card_reward'
+    ),
+    completeDanmaku: payload => completeJson(
+      '你只为杀戮尖塔 2 观战弹幕生成中文氛围短句。只根据 payload 中的职业键、场景标签、语气和已显示事实关键词，返回 JSON：{"phrases":["短句"]}。每句 4 到 18 个中文字符，生成 2 到 3 句。禁止给出出牌、目标、格挡、伤害、胜率或任何操作建议；禁止推断机制、评价玩家、广告、辱骂、链接和解释。不要复述未在 payload 中出现的游戏事实。',
+      payload,
+      'danmaku',
+      true
     )
   };
 }
@@ -286,6 +341,7 @@ module.exports = {
   createOpenAiClient,
   resolveChatTemperature,
   parseAllowedTemperature,
+  readSseText,
   stringifyLog,
   redactSecrets
 };

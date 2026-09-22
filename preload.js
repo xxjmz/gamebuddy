@@ -33,6 +33,8 @@ contextBridge.exposeInMainWorld('gamebuddyBridge', {
   onLlmMode: callback => ipcRenderer.on('bridge-llm-mode', (_event, mode) => callback(mode)),
   onPetSkin: callback => ipcRenderer.on('bridge-pet-skin', (_event, skin) => callback(skin)),
   onLlmLog: callback => ipcRenderer.on('bridge-llm-log', (_event, payload) => callback(payload)),
+  onDanmaku: callback => ipcRenderer.on('bridge-danmaku', (_event, message) => callback(message)),
+  onDanmakuClear: callback => ipcRenderer.on('bridge-danmaku-clear', (_event, state) => callback(state)),
   clearLlmLog: () => ipcRenderer.send('clear-llm-log'),
   getObservation: () => ipcRenderer.invoke('get-observation'),
   refreshRecommendation: () => ipcRenderer.invoke('refresh-recommendation'),
