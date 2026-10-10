@@ -19,21 +19,57 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --include=dev
 
       - name: Build Windows installer
-        run: npm run dist:win
+        id: build
+        shell: pwsh
+        run: |
+          npm run dist:win 2>&1 | Tee-Object -FilePath build-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Check packaged runtime files
+        run: node -e "require('@electron/asar').statFile('dist/win-unpacked/resources/app.asar', 'harness/rest-lifecycle.js')"
+
+      - name: Write installer checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/GameBuddy-Setup-*.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
+
+      - name: Include failure details in job summary
+        if: failure()
+        shell: pwsh
+        run: |
+          if (Test-Path build-windows.log) {
+            '## Windows installer build output' >> $env:GITHUB_STEP_SUMMARY
+            '```text' >> $env:GITHUB_STEP_SUMMARY
+            Get-Content build-windows.log -Tail 80 >> $env:GITHUB_STEP_SUMMARY
+            '```' >> $env:GITHUB_STEP_SUMMARY
+          }
+
+      - name: Upload build log
+        if: always() && steps.build.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: gamebuddy-windows-build-log
+          path: build-windows.log
+          if-no-files-found: ignore
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: gamebuddy-windows
-          path: dist/GameBuddy-Setup-*.exe
+          path: |
+            dist/GameBuddy-Setup-*.exe
+            dist/SHA256SUMS.txt
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -43,4 +79,8 @@ jobs:
           name: GameBuddy ${{ github.ref_name }} (Windows x64)
           body_path: .github/releases/${{ github.ref_name }}.md
           generate_release_notes: false
-          files: dist/GameBuddy-Setup-*.exe
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/GameBuddy-Setup-*.exe
+            dist/SHA256SUMS.txt
