@@ -31,3 +31,5 @@ Windows 构建与安装启动检查通过：https://github.com/yukiykchen/gamebu
 ## 转为正式发布
 
 2026-10-10：维护者明确表示“无需验证，确认可以使用”，据此取消待实机验收作为发布前置条件，将现有 Release 改为正式发布并设为 latest。沿用既有安装包和标签，不再次构建、不新增实机测试记录。更新公开安装说明和网站文案，保留实际构建编号 v0.1.1-rc.1。
+
+正式发布更新流程已通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38038541913 。GitHub releases/latest 已跳转到现有发布页，页面显示 Latest 且不再显示 Pre-release；更新后的 Mod ZIP 和安装说明已实际下载并通过 SHA256 核对，EXE 校验值不变。
