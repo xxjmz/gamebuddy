@@ -27,3 +27,7 @@ Windows 构建与安装启动检查通过：https://github.com/yukiykchen/gamebu
 分发资产修正已通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38038064211 。公开候选 Release：https://github.com/yukiykchen/gamebuddy/releases/tag/v0.1.1-rc.1 。已通过真实 HTTP 下载核对外层 SHA256、Mod DLL 和 JSON 原始字节，以及 ZIP 内部校验记录。Windows 游戏与真实模型验收仍未完成。
 
 网站修改已提交推送 e882fd7，四份经核对的资源随站点托管，预览已更新。MR !2 合入被评审门禁拒绝：Review check not passed. 409 conflict，主分支和实际部署尚未更新。
+
+## 转为正式发布
+
+2026-10-10：维护者明确表示“无需验证，确认可以使用”，据此取消待实机验收作为发布前置条件，将现有 Release 改为正式发布并设为 latest。沿用既有安装包和标签，不再次构建、不新增实机测试记录。更新公开安装说明和网站文案，保留实际构建编号 v0.1.1-rc.1。

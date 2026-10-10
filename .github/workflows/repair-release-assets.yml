@@ -1,4 +1,4 @@
-name: Correct candidate Mod archive checksums
+name: Publish confirmed Windows release
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Preserve existing installer and guide
+      - name: Preserve existing installer
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist | Out-Null
@@ -24,7 +24,7 @@ jobs:
           if ($hash -ne 'fd741fdff15f5abdb1e35f67f09f2857e943bd35da4f58320bb46145297f5b24') {
             throw 'Existing installer SHA256 changed; aborting asset correction'
           }
-          Invoke-WebRequest "$base/windows-install-guide.md" -OutFile dist/windows-install-guide.md
+          Copy-Item docs/windows-install-guide.md -Destination dist/windows-install-guide.md
       - name: Repackage Mod with matching internal checksums
         shell: pwsh
         run: |
@@ -44,13 +44,17 @@ jobs:
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content dist/SHA256SUMS.txt -Encoding ascii
-      - name: Replace corrected Mod ZIP and release checksums
+      - name: Publish confirmed release and updated install guide
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.1.1-rc.1
           draft: false
-          prerelease: true
+          prerelease: false
+          make_latest: true
+          name: GameBuddy · Windows 版
+          body_path: .github/releases/v0.1.1-rc.1.md
           fail_on_unmatched_files: true
           files: |
             dist/GameBuddy-Bridge-0.1.1-rc.1.zip
+            dist/windows-install-guide.md
             dist/SHA256SUMS.txt
