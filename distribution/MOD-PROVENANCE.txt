@@ -1,0 +1,12 @@
+Repository: https://github.com/yukiykchen/gamebuddy
+Repository HEAD at preparation: 01c1dafa99da429a6bd5d15b8fbaf1a4f7170bbf
+Latest committed Mod source change in this checkout: 1fa64aa
+Project Mod / strategy compatibility baseline: Slay the Spire 2 stable v0.107.1
+Mod target framework: net9.0
+Godot SDK: Godot.NET.Sdk/4.5.1
+Manifest id: gamebuddy_bridge
+Manifest version: 0.1.0
+
+The distributed DLL was copied from the locally installed Windows Mod directory under the App宝 Wine environment. The current checkout has no later changes under mod/GameBuddyBridge after the source Mod commit listed above.
+
+Supplied by project maintainer on 2026-10-10. Windows game integration pending acceptance.

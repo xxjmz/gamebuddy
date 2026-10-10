@@ -36,10 +36,22 @@ jobs:
       - name: Check packaged runtime files
         run: node -e "require('@electron/asar').statFile('dist/win-unpacked/resources/app.asar', 'harness/rest-lifecycle.js')"
 
-      - name: Write installer checksums
+      - name: Verify Windows installation and launch
+        shell: pwsh
+        run: ./scripts/windows-package-smoke.ps1
+
+      - name: Package precompiled Bridge and install guide
         shell: pwsh
         run: |
-          Get-ChildItem dist/GameBuddy-Setup-*.exe | ForEach-Object {
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $stage = Join-Path $env:RUNNER_TEMP "gamebuddy-bridge-package"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item distribution/GameBuddyBridge -Destination $stage -Recurse
+          Copy-Item distribution/MOD-PROVENANCE.txt,distribution/MOD-SHA256SUMS.txt -Destination $stage
+          Copy-Item docs/windows-install-guide.md -Destination $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/GameBuddy-Bridge-$version.zip"
+          Copy-Item docs/windows-install-guide.md -Destination dist/windows-install-guide.md
+          Get-ChildItem dist/GameBuddy-Setup-*.exe,dist/GameBuddy-Bridge-*.zip,dist/windows-install-guide.md | ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content -Path dist/SHA256SUMS.txt -Encoding ascii
@@ -48,6 +60,9 @@ jobs:
         if: failure()
         shell: pwsh
         run: |
+          if (Test-Path windows-package-smoke.log) {
+            Get-Content windows-package-smoke.log >> $env:GITHUB_STEP_SUMMARY
+          }
           if (Test-Path build-windows.log) {
             '## Windows installer build output' >> $env:GITHUB_STEP_SUMMARY
             '```text' >> $env:GITHUB_STEP_SUMMARY
@@ -60,7 +75,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gamebuddy-windows-build-log
-          path: build-windows.log
+          path: |
+            build-windows.log
+            windows-package-smoke.log
           if-no-files-found: ignore
 
       - name: Upload installer
@@ -69,6 +86,8 @@ jobs:
           name: gamebuddy-windows
           path: |
             dist/GameBuddy-Setup-*.exe
+            dist/GameBuddy-Bridge-*.zip
+            dist/windows-install-guide.md
             dist/SHA256SUMS.txt
           if-no-files-found: error
 
@@ -79,8 +98,11 @@ jobs:
           name: GameBuddy ${{ github.ref_name }} (Windows x64)
           body_path: .github/releases/${{ github.ref_name }}.md
           generate_release_notes: false
-          draft: true
+          draft: false
+          prerelease: true
           fail_on_unmatched_files: true
           files: |
             dist/GameBuddy-Setup-*.exe
+            dist/GameBuddy-Bridge-*.zip
+            dist/windows-install-guide.md
             dist/SHA256SUMS.txt

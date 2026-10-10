@@ -12,7 +12,7 @@
 - dist:win 固定 --publish never，上传由 softprops/action-gh-release 单独完成，避免双重发布和打包阶段凭据依赖。
 - Node 22 与 npm ci --include=dev 用于构建；面向普通用户的最终安装流程不应依赖 npm。
 - 失败日志写入 GitHub Job Summary，便于公开项目不登录也能定位最后一段错误；日志截断且不输出环境变量。
-- 只有成功生成 EXE 和校验值时才上传 Release 草稿；补齐预编译 Mod 和实机验收后才公开。预编译 Mod 尚未提供，完整免编译接入不得标记完成。
+- 维护者已提供预编译 Mod 和原始 Windows 日志，校验一致。用户授权继续发布；先发布 v0.1.1-rc.1 预发布供实机验收，明确游戏连接和真实 AI 请求尚未验收，不称正式稳定版。Windows CI 必须完成打包、静默安装、安装后依赖加载和应用进程启动检查后才上传公开候选版。
 
 ## Risks / Trade-offs
 
