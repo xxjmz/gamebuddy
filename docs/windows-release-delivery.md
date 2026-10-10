@@ -25,3 +25,5 @@ CI 没有 Steam 游戏及真实模型账号，不能验证 Mod 加载、LIVE 快
 Windows 构建与安装启动检查通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38037792440 。EXE SHA256 为 fd741fdff15f5abdb1e35f67f09f2857e943bd35da4f58320bb46145297f5b24。下载后发现 Windows checkout 将 Mod JSON 转为 CRLF，包内原始校验值因此不匹配；添加定向 eol=lf 并通过仅修正分发资产的工作流重新封装 Mod 与校验文件，保留已构建 EXE，不再次构建。
 
 分发资产修正已通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38038064211 。公开候选 Release：https://github.com/yukiykchen/gamebuddy/releases/tag/v0.1.1-rc.1 。已通过真实 HTTP 下载核对外层 SHA256、Mod DLL 和 JSON 原始字节，以及 ZIP 内部校验记录。Windows 游戏与真实模型验收仍未完成。
+
+网站修改已提交推送 e882fd7，四份经核对的资源随站点托管，预览已更新。MR !2 合入被评审门禁拒绝：Review check not passed. 409 conflict，主分支和实际部署尚未更新。
