@@ -19,3 +19,7 @@ Mod 原始来源、DLL 和 manifest 校验记录在 distribution/ 下。仅分�
 CI 没有 Steam 游戏及真实模型账号，不能验证 Mod 加载、LIVE 快照、模型请求成功或完整界面交互。Windows 游戏实机验收完成前不得将候选版标记为正式稳定版。
 
 普通用户流程见 [Windows 安装指南](windows-install-guide.md)：安装 EXE → 复制预编译 Mod → 启用并重启游戏 → 配置用户环境变量 → 通过桌面快捷方式启动并验证 LIVE 和一次真实 AI 请求。不需要源码编译工具。
+
+## CI 结果
+
+Windows 构建与安装启动检查通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38037792440 。EXE SHA256 为 fd741fdff15f5abdb1e35f67f09f2857e943bd35da4f58320bb46145297f5b24。下载后发现 Windows checkout 将 Mod JSON 转为 CRLF，包内原始校验值因此不匹配；添加定向 eol=lf 并通过仅修正分发资产的工作流重新封装 Mod 与校验文件，保留已构建 EXE，不再次构建。

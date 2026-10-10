@@ -47,7 +47,11 @@ jobs:
           $stage = Join-Path $env:RUNNER_TEMP "gamebuddy-bridge-package"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item distribution/GameBuddyBridge -Destination $stage -Recurse
-          Copy-Item distribution/MOD-PROVENANCE.txt,distribution/MOD-SHA256SUMS.txt -Destination $stage
+          Copy-Item distribution/MOD-PROVENANCE.txt -Destination $stage
+          Get-ChildItem "$stage/GameBuddyBridge/*" -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  GameBuddyBridge/$($_.Name)"
+          } | Set-Content -Path "$stage/MOD-SHA256SUMS.txt" -Encoding ascii
           Copy-Item docs/windows-install-guide.md -Destination $stage
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/GameBuddy-Bridge-$version.zip"
           Copy-Item docs/windows-install-guide.md -Destination dist/windows-install-guide.md

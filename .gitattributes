@@ -1,0 +1,4 @@
+
+# Preserve maintainer-provided release asset bytes on Windows checkout.
+distribution/**/*.json text eol=lf
+distribution/**/*.dll binary

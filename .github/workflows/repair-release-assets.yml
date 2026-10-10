@@ -1,0 +1,56 @@
+name: Correct candidate Mod archive checksums
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [release/v0.1.0]
+    paths: [.github/workflows/repair-release-assets.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  repair-assets:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preserve existing installer and guide
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          $base = 'https://github.com/yukiykchen/gamebuddy/releases/download/v0.1.1-rc.1'
+          Invoke-WebRequest "$base/GameBuddy-Setup-0.1.1-rc.1.exe" -OutFile dist/GameBuddy-Setup-0.1.1-rc.1.exe
+          $hash = (Get-FileHash dist/GameBuddy-Setup-0.1.1-rc.1.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -ne 'fd741fdff15f5abdb1e35f67f09f2857e943bd35da4f58320bb46145297f5b24') {
+            throw 'Existing installer SHA256 changed; aborting asset correction'
+          }
+          Invoke-WebRequest "$base/windows-install-guide.md" -OutFile dist/windows-install-guide.md
+      - name: Repackage Mod with matching internal checksums
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'gamebuddy-bridge-corrected'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item distribution/GameBuddyBridge -Destination $stage -Recurse
+          Copy-Item distribution/MOD-PROVENANCE.txt -Destination $stage
+          Copy-Item dist/windows-install-guide.md -Destination $stage
+          $dllHash = (Get-FileHash "$stage/GameBuddyBridge/gamebuddy_bridge.dll" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $jsonHash = (Get-FileHash "$stage/GameBuddyBridge/GameBuddyBridge.json" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($dllHash -ne 'ffb7e85b4c30ce0ee4ee6298c384c2ec66060f2a6d0d6999b57f47a240ffc481' -or $jsonHash -ne '46ee6696b469a5c019f9d842cd81be058314dc4f9e8b51f1346a5df5a0b64246') {
+            throw 'Mod files differ from maintainer supplied bytes'
+          }
+          @("$dllHash  GameBuddyBridge/gamebuddy_bridge.dll", "$jsonHash  GameBuddyBridge/GameBuddyBridge.json") | Set-Content "$stage/MOD-SHA256SUMS.txt" -Encoding ascii
+          Compress-Archive -Path "$stage/*" -DestinationPath dist/GameBuddy-Bridge-0.1.1-rc.1.zip
+          Get-ChildItem dist/GameBuddy-Setup-*.exe,dist/GameBuddy-Bridge-*.zip,dist/windows-install-guide.md | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content dist/SHA256SUMS.txt -Encoding ascii
+      - name: Replace corrected Mod ZIP and release checksums
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.1-rc.1
+          draft: false
+          prerelease: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/GameBuddy-Bridge-0.1.1-rc.1.zip
+            dist/SHA256SUMS.txt
