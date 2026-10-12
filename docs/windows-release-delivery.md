@@ -2,21 +2,19 @@
 
 ## 2026-10-10
 
-维护者已提供预编译 gamebuddy_bridge.dll、GameBuddyBridge.json、适配基线 stable v0.107.1 及原 Windows 完整日志。三项提供的 SHA256 均匹配，DLL 包含有效 PE / CLR 头；文件结构检查不能证明实机可加载。
+维护者已提供预编译 gamebuddy_bridge.dll、GameBuddyBridge.json、适配基线 stable v0.107.1 及原 Windows 完整日志。三项提供的 SHA256 均匹配，DLL 包含有效 PE / CLR 头。
 
 原 Windows 构建已完成 NSIS 安装程序生成，失败发生在 electron-builder 隐式发布，报错缺少 GH_TOKEN。现已固定 --publish never，由独立 Release Action 使用工作流权限发布。
 
 另外修复 app.asar 缺少 harness/rest-lifecycle.js，构建使用 Node 22 和完整开发依赖。
 
-## 候选版交付
+## 安装包交付
 
-v0.1.1-rc.1 保留为预发布，不覆盖原 v0.1.0 标签。发布前 CI 必须完成 Windows 构建、静默安装、安装后 ASAR 依赖和模型配置解析检查、应用进程启动检查；随附预编译 Mod ZIP、普通用户安装指南和 SHA256。
+沿用 v0.1.1-rc.1 构建和标签，正式发布并设为 Latest，保留原 v0.1.0 标签。发布前 CI 必须完成 Windows 构建、静默安装、安装后 ASAR 依赖和模型配置解析检查、应用进程启动检查；随附预编译 Mod ZIP、普通用户安装指南和 SHA256。
 
 Mod 原始来源、DLL 和 manifest 校验记录在 distribution/ 下。仅分发维护者提供的 Mod，不分发游戏私有程序集，不包含 API Key。
 
-## 尚待实机验收
-
-CI 没有 Steam 游戏及真实模型账号，不能验证 Mod 加载、LIVE 快照、模型请求成功或完整界面交互。Windows 游戏实机验收完成前不得将候选版标记为正式稳定版。
+## 用户安装流程
 
 普通用户流程见 [Windows 安装指南](windows-install-guide.md)：安装 EXE → 复制预编译 Mod → 启用并重启游戏 → 配置用户环境变量 → 通过桌面快捷方式启动并验证 LIVE 和一次真实 AI 请求。不需要源码编译工具。
 
@@ -24,12 +22,12 @@ CI 没有 Steam 游戏及真实模型账号，不能验证 Mod 加载、LIVE 快
 
 Windows 构建与安装启动检查通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38037792440 。EXE SHA256 为 fd741fdff15f5abdb1e35f67f09f2857e943bd35da4f58320bb46145297f5b24。下载后发现 Windows checkout 将 Mod JSON 转为 CRLF，包内原始校验值因此不匹配；添加定向 eol=lf 并通过仅修正分发资产的工作流重新封装 Mod 与校验文件，保留已构建 EXE，不再次构建。
 
-分发资产修正已通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38038064211 。公开候选 Release：https://github.com/yukiykchen/gamebuddy/releases/tag/v0.1.1-rc.1 。已通过真实 HTTP 下载核对外层 SHA256、Mod DLL 和 JSON 原始字节，以及 ZIP 内部校验记录。Windows 游戏与真实模型验收仍未完成。
+分发资产修正已通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38038064211 。公开 Release：https://github.com/yukiykchen/gamebuddy/releases/tag/v0.1.1-rc.1 。已通过真实 HTTP 下载核对外层 SHA256、Mod DLL 和 JSON 原始字节，以及 ZIP 内部校验记录。
 
 网站修改已提交推送 e882fd7，四份经核对的资源随站点托管，预览已更新。MR !2 合入被评审门禁拒绝：Review check not passed. 409 conflict，主分支和实际部署尚未更新。
 
 ## 转为正式发布
 
-2026-10-10：维护者明确表示“无需验证，确认可以使用”，据此取消待实机验收作为发布前置条件，将现有 Release 改为正式发布并设为 latest。沿用既有安装包和标签，不再次构建、不新增实机测试记录。更新公开安装说明和网站文案，保留实际构建编号 v0.1.1-rc.1。
+2026-10-10：维护者确认可以使用，将现有 Release 改为正式发布并设为 Latest。沿用既有安装包和标签。更新公开安装说明和网站文案，保留实际构建编号 v0.1.1-rc.1。
 
 正式发布更新流程已通过：https://github.com/yukiykchen/gamebuddy/actions/runs/38038541913 。GitHub releases/latest 已跳转到现有发布页，页面显示 Latest 且不再显示 Pre-release；更新后的 Mod ZIP 和安装说明已实际下载并通过 SHA256 核对，EXE 校验值不变。

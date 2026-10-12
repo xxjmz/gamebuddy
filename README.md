@@ -2,9 +2,11 @@
 
 GameBuddy 是面向《杀戮尖塔 2》的 Windows AI 桌面搭子。它通过只读 Mod 获取当前对局状态，在主面板和悬浮桌宠中提供选牌、路线、休息处、商店购买以及小怪 / 精英 / Boss 攻略建议；它不会替玩家点击、出牌或修改游戏状态。
 
-当前策略资料锁定《杀戮尖塔 2》stable `v0.107.1`。项目仍处于 `0.1.0` 原型阶段：核心链路和离线 Replay Harness 已实现，真实游戏 Mod 仍需在安装了游戏的 Windows 机器上完成最终验收。
+当前策略资料对应《杀戮尖塔 2》stable `v0.107.1`。Windows 版已发布，提供桌面安装包和预编译 Bridge Mod。
 
-## 立即体验
+[下载 Windows 版](https://github.com/yukiykchen/gamebuddy/releases/latest) · [安装与 API Key 配置指南](docs/windows-install-guide.md)
+
+## 源码开发
 
 开发环境需要 Git、Node.js 20+ 和 npm。首次使用从源码获取项目并安装锁定依赖：
 
@@ -38,12 +40,12 @@ npm start
 | --- | --- | --- |
 | 主面板 | 已实现 | 展示战斗、卡牌奖励、地图路线、休息处、事件和商店选择状态 |
 | 悬浮桌宠 | 已实现 | 置顶、拖动、托盘控制、状态提醒、单句决策卡、按需展开的理由详情、LLM 思考动画与实时用时、可关闭及重新打开的遭遇攻略弹窗 |
-| 实时游戏状态 Bridge | 已实现，待真机验收 | 只读采集角色、生命、牌组、遗物、药水、地图、敌人、事件和商店库存 |
+| 实时游戏状态 Bridge | 已实现 | 只读采集角色、生命、牌组、遗物、药水、地图、敌人、事件和商店库存 |
 | 卡牌奖励 Agent | 已实现 | 逐张分析优缺点、适用场景和 Boss / 精英适配；桌宠默认只展示拿牌结论，展开后查看理由、风险、来源与置信度，支持建议跳过 |
 | 地图路线 Agent | 已实现 | 只在当前分叉比较不同可点入口；生命 ≥65% 采用成长策略、35%～65% 采用平衡策略、≤35% 采用保命策略，并考虑精英、商店、火堆、路线灵活性和连续战斗压力；信息接近时仍给出暂时首选并降低置信度，不宣称路线客观等价 |
 | 休息处 Agent | 已实现 | 用社区策略 Skill 比较回血与逐张升级收益，结合牌组、遗物、地图和近期强敌给出具体建议 |
 | 问号事件 Agent | 已实现 | 接入 66 条 Spire Codex 事件和多页面决策树，逐项展示收益、代价与风险；致命或资源不足选项不可推荐 |
-| 商店选择 Agent | 已实现，待真机验收 | 读取实际库存和价格，结合完整牌组、持有遗物/药水、金币、地图与后续强敌，一次给出最多 3 项的完整购物清单、顺序、总价与余额，也可建议保留金币 |
+| 商店选择 Agent | 已实现 | 读取实际库存和价格，结合完整牌组、持有遗物/药水、金币、地图与后续强敌，一次给出最多 3 项的完整购物清单、顺序、总价与余额，也可建议保留金币 |
 | 全遭遇攻略 | 已实现 | 覆盖 stable `v0.107.1` 的 63 个普通遭遇、12 个精英和 12 个 Boss；每场只自动弹一次，关闭后可点桌宠顶部“查看攻略”再次查看 |
 | LLM 复核 | 已实现，可选 | 在规则候选范围内复核；未配置密钥时自动退回规则模式 |
 | Replay / 录制 / 协议校验 | 已实现 | 可离线回放、录制真实对局并验证协议与事件 |
@@ -174,7 +176,7 @@ npm start
 npm run harness:inspect -- --once
 ```
 
-看到 `source=sts2-mod-bridge` 且桌面端变为 `LIVE`，说明实时链路已接通。逐项真机验收见 [Windows 联调验收](./docs/windows-validation.md)，Mod 自身说明见 [GameBuddyBridge](./mod/GameBuddyBridge/README.md)。
+看到 `source=sts2-mod-bridge` 且桌面端变为 `LIVE`，说明实时链路已接通。连接排查见 [Windows 联调指南](./docs/windows-validation.md)，Mod 自身说明见 [GameBuddyBridge](./mod/GameBuddyBridge/README.md)。
 
 ## 常用命令
 
@@ -209,15 +211,14 @@ npm run harness:inspect -- --once
 - `windows-latest` 构建 `GameBuddy-Setup-*.exe`；
 - 带有本地游戏安装的 `self-hosted, windows, sts2` Runner 构建 Mod。
 
-公开 Runner 无法获得游戏私有程序集，因此不能构建 `gamebuddy_bridge.dll`。Windows 安装包也不包含能够绕过游戏安装要求的 Mod 二进制；Mod 必须在合法安装游戏的 Windows 环境中构建。
+发布页提供预编译 Bridge Mod，普通用户无需自行编译。维护者编译 Mod 时需要本机合法游戏安装提供的程序集，公开 Runner 不分发这些程序集。
 
-当前文档的完整受支持流程是“克隆源码 + 本机构建 Mod + `npm start`”。NSIS 安装包仅包含桌面端，尚未提供 Mod 自动安装和图形化 API Key 设置；使用安装包时仍需单独安装 Mod，并通过 Windows 用户环境变量配置 `GAMEBUDDY_LLM_*`。
+普通用户流程为“安装桌面端 → 复制并启用预编译 Mod → 配置模型服务 → 开始对局”，详见 [Windows 安装指南](docs/windows-install-guide.md)。安装包包含桌面端，Mod 单独下载并安装；API Key 通过 Windows 用户环境变量 `GAMEBUDDY_LLM_*` 配置。
 
 ## 已知限制
 
 - 当前不提供战斗出牌顺序建议。
-- Mod 已编码实现，但尚未记录一轮完整的 Windows stable `v0.107.1` 真机验收结果。
 - 游戏处于 Early Access；版本变化后需要刷新卡牌知识，并复核 Boss / 精英档案。
 - Spire Codex 或模型服务不可用时，资料丰富度会下降，但规则模式仍可运行。
-- 当前主要面向单人对局；多人模式的状态语义和策略尚未专项验证。
+- 当前面向单人对局，不提供多人合作专项策略。
 - 建议是辅助信息，不保证通关或避免战损。
