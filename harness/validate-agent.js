@@ -803,6 +803,15 @@ recommendRoute(mapState, { now: 1 }).then(async rulesRec => {
   assert.equal(rewardRec.task, 'card_reward');
   assert.equal(rewardRec.options.length, 3);
   assert.ok(rewardRec.options.every(card => card.fit?.boss && card.fit?.elite));
+  assert.ok(rewardRec.options.every(card => card.archetypeImpact?.id === 'auto_strike'));
+  assert.ok(rewardRec.options.every(card => card.archetypeScores?.length === 4));
+  assert.ok(rewardRec.options.every(card => card.archetypeImpacts?.length === 4));
+  const silentRewardRec = await recommendCardReward({
+    ...rewardObservation,
+    state: { ...mapState, run: { ...mapState.run, character: 'silent' } }
+  }, { codex: fakeCodex, now: 14 });
+  assert.ok(silentRewardRec.options.every(card => !card.archetypeImpact));
+  assert.ok(silentRewardRec.options.every(card => !card.archetypeScores && !card.archetypeImpacts));
 
   const llmCardRec = await recommendCardReward(rewardObservation, {
     codex: fakeCodex,

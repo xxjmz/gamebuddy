@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { autoStrikeScore, autoStrikeImpact, decorateAutoStrikeCards, draftImpactMessage, isIronclad } = require('../knowledge/auto-strike');
+const { decorateIroncladArchetypes } = require('../knowledge/ironclad-archetypes');
 
 const hellraiser = { id: 'HELLRAISER', name: '地狱狂徒' };
 const pommel = { id: 'POMMEL_STRIKE', name: '剑柄打击' };
@@ -50,13 +51,12 @@ test('耸肩无视在有启动循环时为正分过牌辅助', () => {
   assert.equal(impact.reason, '过牌辅助');
 });
 
-test('硬毒牌比无关填充大幅更负', () => {
+test('原始力量不再因主动误用风险被固定判作硬毒', () => {
   const base = [hellraiser, pommel, pommel, { id: 'PILLAGE' }, ...Array(10).fill(defend)];
-  const poison = autoStrikeImpact(base, [], primal);
+  const conditional = autoStrikeImpact(base, [], primal);
   const filler = autoStrikeImpact(base, [], ironWave);
-  assert.ok(poison.deltaPoints <= -10, `expected poison <= -10, got ${poison.deltaPoints}`);
-  assert.ok(poison.deltaPoints < filler.deltaPoints - 5);
-  assert.equal(poison.reason, '破坏循环');
+  assert.notEqual(conditional.role, 'hardPoison');
+  assert.ok(conditional.deltaPoints >= filler.deltaPoints - 2);
 });
 
 test('软反牌带支线冲突标签且为负', () => {
@@ -66,7 +66,7 @@ test('软反牌带支线冲突标签且为负', () => {
   assert.equal(impact.reason, '支线冲突');
 });
 
-test('打击包弹药在有狂徒时小正，坚定不移与痛击不抬辅助', () => {
+test('打击包弹药与易伤窗口在有狂徒时为正', () => {
   const base = [hellraiser, pommel, ...Array(10).fill(defend)];
   const twin = autoStrikeImpact(base, [], { id: 'TWIN_STRIKE' });
   assert.ok(twin.deltaPoints > 0, `expected twin ammo > 0, got ${twin.deltaPoints}`);
@@ -74,7 +74,7 @@ test('打击包弹药在有狂徒时小正，坚定不移与痛击不抬辅助',
   const unmovable = autoStrikeImpact(base, [], { id: 'UNMOVABLE' });
   assert.ok(unmovable.deltaPoints <= 0);
   const bash = autoStrikeImpact(base, [], { id: 'BASH' });
-  assert.ok(bash.deltaPoints <= 0);
+  assert.ok(bash.deltaPoints > 0);
 });
 
 test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
@@ -87,11 +87,17 @@ test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
   assert.equal(offered[0].archetypeImpact, undefined);
   assert.equal(decorateAutoStrikeCards('silent', deck, [], offered), offered);
   const event = { name: 'card.reward.opened', data: { signature: 'POMMEL_STRIKE:False|PILLAGE:False|ANGER:False' } };
-  const message = draftImpactMessage(event, 'ironclad', decorated);
+  const fourArchetypeCards = decorateIroncladArchetypes('ironclad', deck, [], offered);
+  assert.ok(fourArchetypeCards.every(card => card.archetypeScores.length === 4 && card.archetypeImpacts.length === 4));
+  const message = draftImpactMessage(event, 'ironclad', fourArchetypeCards);
   assert.equal(message.type, 'draft_impact');
   assert.equal(message.signature, event.data.signature);
   assert.deepEqual(message.impacts.map(impact => impact.cardId), offered.map(card => card.id));
+  assert.equal(message.impacts[0].reason, '循环');
   assert.ok(message.impacts.every(impact => typeof impact.reason === 'string'));
+  assert.ok(message.impacts.every(impact => (
+    Object.keys(impact).sort().join(',') === 'cardId,deltaPoints,reason'
+  )));
   assert.equal(draftImpactMessage(event, 'silent', decorated), null);
   assert.equal(draftImpactMessage({ name: 'card.reward.opened', data: {} }, 'ironclad', decorated), null);
 });

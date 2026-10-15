@@ -7,6 +7,8 @@ const { createOpenAiClient, readLlmConfig } = require('./agent/llm/openai');
 const { ensureMapRoutes, routeChoiceCount } = require('./agent/tasks/route');
 const { decide } = require('./agent/router');
 const { recordDecision } = require('./agent/recorder');
+const { decorateIroncladArchetypes } = require('./agent/knowledge/ironclad-archetypes');
+const { draftImpactMessage } = require('./agent/knowledge/auto-strike');
 const { encounterGuideSignature, buildEncounterGuide } = require('./agent/tasks/encounter-guide');
 const { DanmakuBridgeAdapter } = require('./agent/danmaku/bridge-adapter');
 const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
@@ -438,7 +440,26 @@ function handleAcceptedEvent(event) {
     data: event.data,
     cardName: event.data?.cardName || event.data?.card?.name
   }).catch(error => console.warn('GameBuddy danmaku event skipped:', error.message));
-  broadcast('bridge-event', event);
+  const liveState = observationStore.getObservation()?.state;
+  const displayEvent = event.name === 'card.reward.opened' && Array.isArray(event.data?.cards)
+    ? {
+      ...event,
+      data: {
+        ...event.data,
+        cards: decorateIroncladArchetypes(
+          liveState?.run?.character,
+          liveState?.player?.cards || [],
+          liveState?.player?.relics || [],
+          event.data.cards
+        )
+      }
+    }
+    : event;
+  broadcast('bridge-event', displayEvent);
+  const impactMessage = draftImpactMessage(event, liveState?.run?.character, displayEvent.data?.cards);
+  if (impactMessage && bridgeSocket?.readyState === WebSocket.OPEN) {
+    bridgeSocket.send(JSON.stringify(impactMessage));
+  }
   if (event.name === 'combat.ended') {
     clearEncounterGuide();
     hideDanmakuAfter();
