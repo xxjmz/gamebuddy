@@ -208,8 +208,17 @@ function draftView() {
     const knowledgeHtml = knowledge
       ? `<div class="card-knowledge"><div class="knowledge-head"><span>${escapeHtml(knowledge.rank || '未评级')}</span><strong>${escapeHtml(knowledge.sourceName || 'GameBuddy')}</strong></div><p>${escapeHtml(knowledge.expertSummary || '')}</p><div class="knowledge-condition good">适合：${escapeHtml((knowledge.goodWhen || []).slice(0, 2).join('；'))}</div><div class="knowledge-condition bad">慎拿：${escapeHtml((knowledge.badWhen || []).slice(0, 2).join('；'))}</div>${knowledge.sourceTimestamp ? `<div class="knowledge-source">${escapeHtml(knowledge.gameVersion || '')} · 来源时间点 ${escapeHtml(knowledge.sourceTimestamp)}</div>` : `<div class="knowledge-source">${escapeHtml(knowledge.gameVersion || '')} · 无专家时间点，使用社区/机制综合评价</div>`}</div>`
       : '';
+    const delta = card.archetypeImpact?.id === 'auto_strike' ? card.archetypeImpact.deltaPoints : null;
+    const reason = card.archetypeImpact?.reason;
+    const impactTitle = reason
+      ? `流派度变化（${reason}），单位为百分点；流派度≠胜率`
+      : '流派度变化，单位为百分点；流派度≠胜率';
+    const impactHtml = Number.isFinite(delta)
+      ? `<div class="archetype-impact ${delta > 0 ? 'positive' : delta < 0 ? 'negative' : 'neutral'}" title="${escapeHtml(impactTitle)}">自动打击流 ${delta > 0 ? '+' : ''}${escapeHtml(delta)}%${reason ? `<span class="archetype-reason"> · ${escapeHtml(reason)}</span>` : ''}</div>`
+      : '';
     return `<article class="draft-card ${recommended ? 'top-pick' : ''}" data-card="${escapeHtml(card.name || card.id)}">
       <div class="draft-card-head"><span class="pick-tag">${recommended ? '首选' : rec ? `第 ${index + 1} 位` : '分析中'}</span><strong>${Number.isFinite(card.score) ? card.score : '--'}</strong></div>
+      ${impactHtml}
       <div class="card-name">${escapeHtml(card.name || card.id)}</div>
       <div class="draft-card-meta">${escapeHtml(card.type || '未知')} · ${escapeHtml(card.rarity || '未知')} · ${card.cost === null ? 'X' : escapeHtml(card.cost ?? '?')} 费</div>
       <p>${escapeHtml(card.description || '正在从 Spire Codex 获取卡牌说明与对局统计。')}</p>
@@ -229,7 +238,7 @@ function draftView() {
     : '分析中';
   const context = rec?.context || {};
   const defeatedType = state.reward?.context?.defeatedType;
-  return `<div class="draft-layout"><section class="panel draft-offer"><div class="draft-kicker">REWARD / CARD REWARD</div><h2 class="draft-title">${title}</h2><p class="recommendation-reason">${escapeHtml(reason)}</p>${skipPick ? '<div class="skip-advice">跳过也是有效选择：避免弱牌稀释核心循环。</div>' : ''}<div class="draft-cards">${cardHtml}</div></section><section class="panel draft-side"><div class="panel-heading"><span class="panel-title">选牌依据</span><span class="panel-meta">${escapeHtml(sourceLabel)}</span></div><div class="deck-stat"><span>卡组厚度</span><strong>${state.player.cards.length || '--'} 张</strong></div><div class="deck-stat"><span>遗物 / 药水</span><strong>${state.player.relics.length || 0} / ${state.player.potions.length || 0}</strong></div><div class="deck-stat"><span>金币</span><strong>${state.player.gold ?? '--'}</strong></div><div class="deck-stat"><span>当前生命</span><strong>${state.player.hp || '--'} / ${state.player.maxHp || '--'}</strong></div><div class="deck-stat"><span>近期精英</span><strong>${context.eliteSoon ? '有' : '未发现'}</strong></div><div class="deck-stat"><span>确定 Boss</span><strong>${escapeHtml(context.knownBoss || '尚未识别')}</strong></div><div class="deck-stat"><span>接近 Boss</span><strong>${context.bossSoon ? '是' : '否'}</strong></div><div class="deck-stat"><span>刚结束战斗</span><strong>${escapeHtml(defeatedType || '普通战斗')}</strong></div>${context.archetype ? `<div class="archetype-note"><span>当前流派</span><strong>${escapeHtml(context.archetype)}</strong></div>` : ''}<div class="data-empty draft-disclaimer">建议只辅助判断，不会替你点击卡牌。</div></section></div>`;
+  return `<div class="draft-layout"><section class="panel draft-offer"><div class="draft-kicker">REWARD / CARD REWARD</div><h2 class="draft-title">${title}</h2><p class="recommendation-reason">${escapeHtml(reason)}</p>${skipPick ? '<div class="skip-advice">跳过也是有效选择：避免弱牌稀释核心循环。</div>' : ''}<div class="draft-cards">${cardHtml}</div></section><section class="panel draft-side"><div class="panel-heading"><span class="panel-title">选牌依据</span><span class="panel-meta">${escapeHtml(sourceLabel)}</span></div><div class="deck-stat"><span>卡组厚度</span><strong>${state.player.cards.length || '--'} 张</strong></div><div class="deck-stat"><span>遗物 / 药水</span><strong>${state.player.relics.length || 0} / ${state.player.potions.length || 0}</strong></div><div class="deck-stat"><span>金币</span><strong>${state.player.gold ?? '--'}</strong></div><div class="deck-stat"><span>当前生命</span><strong>${state.player.hp || '--'} / ${state.player.maxHp || '--'}</strong></div><div class="deck-stat"><span>近期精英</span><strong>${context.eliteSoon ? '有' : '未发现'}</strong></div><div class="deck-stat"><span>确定 Boss</span><strong>${escapeHtml(context.knownBoss || '尚未识别')}</strong></div><div class="deck-stat"><span>接近 Boss</span><strong>${context.bossSoon ? '是' : '否'}</strong></div><div class="deck-stat"><span>刚结束战斗</span><strong>${escapeHtml(defeatedType || '普通战斗')}</strong></div><div class="data-empty draft-disclaimer">建议只辅助判断，不会替你点击卡牌。</div></section></div>`;
 }
 
 const MAP_TYPE_LABELS = {
@@ -460,6 +469,7 @@ window.gamebuddyBridge?.onState(applyBridgeState);
 window.gamebuddyBridge?.onEvent(event => {
   if (event.name === 'card.reward.opened') {
     state.reward = event.data || null;
+    state.recommendation = null;
     state.mode = 'draft';
     render();
     showToast('发现新的卡牌奖励');

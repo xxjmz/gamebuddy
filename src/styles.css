@@ -180,6 +180,11 @@ h1 { margin: 9px 0 7px; color: var(--cream); font: 500 30px Georgia, "Songti SC"
 .draft-card-head { display: flex; align-items: center; justify-content: space-between; }
 .draft-card-head strong { color: var(--mint); font: 600 22px Georgia, serif; }
 .draft-card.top-pick .draft-card-head strong { color: var(--amber); }
+.archetype-impact { margin-top: 12px; padding: 5px 7px; border: 1px solid #4a5050; color: #929b99; background: #202725; font-size: 10px; font-weight: 700; }
+.archetype-impact.positive { border-color: #688d7d; color: var(--mint); }
+.archetype-impact.negative { border-color: #805c56; color: #d48e82; }
+.archetype-impact .archetype-reason { font-weight: 500; opacity: 0.85; }
+.draft-card .archetype-impact + .card-name { margin-top: 8px; }
 .draft-card-meta { margin-top: 7px; color: #827d73; font-size: 9px; }
 .draft-fit { display: flex; gap: 6px; margin-top: 13px; }
 .draft-fit span { padding: 4px 6px; border: 1px solid #4a5050; color: #929b99; font-size: 9px; }

@@ -1,6 +1,7 @@
 const { SCHEMA } = require('../recommendation');
 const { createSpireCodexClient, normalizeKey, stripMarkup, inferUpgraded } = require('../knowledge/spire-codex');
 const { cardSearchText, deriveMechanicTags, isStatusGenerationTrigger, inferOrbGeneration } = require('../knowledge/mechanic-tags');
+const { autoStrikeImpact, isIronclad } = require('../knowledge/auto-strike');
 
 const codexClient = createSpireCodexClient();
 
@@ -553,7 +554,14 @@ async function recommendCardReward(observation, { llm, now = Date.now(), codex =
   const threats = upcomingThreats(state, reward);
   const enemyTags = threatTagSet(knowledge, threats);
   const stats = coachMap(knowledge.coach);
-  const options = knowledge.cards.map(card => analyzeCard(card, state, context, threats, stats.get(normalizeKey(card.id || card.name)), enemyTags))
+  const options = knowledge.cards.map(card => {
+    const analysis = analyzeCard(card, state, context, threats, stats.get(normalizeKey(card.id || card.name)), enemyTags);
+    if (isIronclad(state.run?.character)) {
+      const impact = autoStrikeImpact(knowledge.deckCards || state.player?.cards || [], knowledge.relics || state.player?.relics || [], card);
+      if (impact) analysis.archetypeImpact = impact;
+    }
+    return analysis;
+  })
     .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name, 'zh-CN'));
   if (!options.length) return null;
 
