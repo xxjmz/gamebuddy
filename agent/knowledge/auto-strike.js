@@ -18,7 +18,8 @@ function legacyImpact(impact) {
     payoff: '输出',
     support: '过牌辅助',
     softAnti: '支线冲突'
-  }[impact.role] || (/打击弹药/.test(impact.reason) ? '弹药'
+  }[impact.role] || (impact.reason === '仅增加牌组厚度' ? '稀释'
+    : /打击弹药/.test(impact.reason) ? '弹药'
     : impact.deltaPoints < 0 ? '稀释'
       : impact.reason);
   return { ...impact, reason };
@@ -37,23 +38,44 @@ function decorateAutoStrikeCards(character, deck, relics, candidates) {
     : card);
 }
 
+const DRAFT_ARCHETYPE_IDS = Object.freeze(['auto_strike', 'exhaust', 'strength', 'block']);
+
+function draftArchetypes(card) {
+  if (!Array.isArray(card?.archetypeImpacts) || card.archetypeImpacts.length !== DRAFT_ARCHETYPE_IDS.length) {
+    return null;
+  }
+  const byId = new Map(card.archetypeImpacts.map(impact => [impact?.id, impact]));
+  if (byId.size !== DRAFT_ARCHETYPE_IDS.length) return null;
+  const archetypes = DRAFT_ARCHETYPE_IDS.map(id => {
+    const impact = byId.get(id);
+    if (!impact || !Number.isInteger(impact.deltaPoints)
+      || impact.deltaPoints < -100 || impact.deltaPoints > 100) return null;
+    return {
+      id,
+      deltaPoints: impact.deltaPoints,
+      reason: typeof impact.reason === 'string' && impact.reason ? impact.reason : undefined
+    };
+  });
+  return archetypes.includes(null) ? null : archetypes;
+}
+
 function draftImpactMessage(rewardEvent, character, cards) {
   if (rewardEvent?.name !== 'card.reward.opened'
     || !isIronclad(character)
     || !rewardEvent.data?.signature
     || !Array.isArray(cards)) return null;
-  const impacts = cards
-    .filter(card => card?.id && card.archetypeImpact?.id === 'auto_strike'
-      && Number.isInteger(card.archetypeImpact.deltaPoints))
-    .map(card => {
-      const impact = legacyImpact(card.archetypeImpact);
-      return {
-        cardId: card.id,
-        deltaPoints: impact.deltaPoints,
-        reason: impact.reason || undefined
-      };
-    });
-  return impacts.length
+  const impacts = cards.map(card => {
+    const archetypes = draftArchetypes(card);
+    if (!card?.id || !archetypes) return null;
+    const impact = legacyImpact(card.archetypeImpacts.find(item => item.id === 'auto_strike'));
+    return {
+      cardId: card.id,
+      deltaPoints: archetypes[0].deltaPoints,
+      reason: impact.reason || undefined,
+      archetypes
+    };
+  });
+  return impacts.length && !impacts.includes(null)
     ? { type: 'draft_impact', signature: rewardEvent.data.signature, impacts }
     : null;
 }
@@ -62,6 +84,7 @@ module.exports = {
   autoStrikeScore,
   autoStrikeImpact,
   decorateAutoStrikeCards,
+  DRAFT_ARCHETYPE_IDS,
   draftImpactMessage,
   isIronclad
 };

@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { validateMessage, validateState } = require('./protocol');
+const { DRAFT_ARCHETYPE_IDS, validateDraftImpactMessage, validateMessage, validateState } = require('./protocol');
 
 const validState = {
   schema: 'gamebuddy.state.v1',
@@ -44,7 +44,8 @@ assert.equal(validateMessage({
       starCostX: false,
       starCostSource: 'runtime'
     }, 'IRON_WAVE'],
-    canSkip: true
+    canSkip: true,
+    signature: 'SEVEN_STARS:True|IRON_WAVE:False'
   }
 }).ok, true);
 assert.equal(validateMessage({
@@ -64,6 +65,12 @@ assert.equal(validateMessage({
   name: 'card.reward.opened',
   timestamp: Date.now(),
   data: { cards: [] }
+}).ok, false);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'card.reward.opened',
+  timestamp: Date.now(),
+  data: { cards: ['IRON_WAVE'], signature: 42 }
 }).ok, false);
 assert.equal(validateMessage({ type: 'event', name: 'made.up.event', timestamp: Date.now() }).ok, false);
 assert.equal(validateMessage({ type: 'state', data: { ...validState, player: { ...validState.player, energy: '3' } } }).ok, false);
@@ -138,4 +145,36 @@ assert.equal(validateState({
   reward: { cards: [] }
 }).ok, false);
 
-console.log('Protocol validation cases passed: 22');
+const rewardSignature = 'ANGER:False|POMMEL_STRIKE:False|BASH:True';
+const draftImpact = {
+  type: 'draft_impact',
+  signature: rewardSignature,
+  impacts: ['ANGER', 'POMMEL_STRIKE', 'BASH'].map((cardId, cardIndex) => ({
+    cardId,
+    deltaPoints: cardIndex - 1,
+    reason: '兼容原因',
+    archetypes: DRAFT_ARCHETYPE_IDS.map((id, archetypeIndex) => ({
+      id,
+      deltaPoints: cardIndex + archetypeIndex - 2,
+      reason: `${id}-reason`
+    }))
+  }))
+};
+draftImpact.impacts.forEach(impact => { impact.deltaPoints = impact.archetypes[0].deltaPoints; });
+assert.equal(validateDraftImpactMessage(draftImpact).ok, true);
+assert.equal(draftImpact.signature, rewardSignature);
+
+const invalidDraft = mutate => {
+  const copy = JSON.parse(JSON.stringify(draftImpact));
+  mutate(copy);
+  return validateDraftImpactMessage(copy).ok;
+};
+assert.equal(invalidDraft(message => message.impacts[0].archetypes.pop()), false);
+assert.equal(invalidDraft(message => {
+  message.impacts[0].archetypes[3].id = message.impacts[0].archetypes[0].id;
+}), false);
+assert.equal(invalidDraft(message => { message.impacts[1].archetypes[2].deltaPoints = 101; }), false);
+assert.equal(invalidDraft(message => { message.impacts[2].archetypes[1].deltaPoints = 0.5; }), false);
+assert.equal(invalidDraft(message => { message.impacts[0].deltaPoints += 1; }), false);
+
+console.log('Protocol validation cases passed, including four-archetype draft impacts');

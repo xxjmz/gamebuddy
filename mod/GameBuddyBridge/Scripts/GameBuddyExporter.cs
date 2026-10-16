@@ -375,9 +375,11 @@ public static class GameBuddyExporter
         }
 
         _lastCardRewardSignature = signature;
+        GameBuddyRewardOverlay.SetOffer((MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardRewardSelectionScreen)screen, signature, mapped.Select(card => card.Id));
         PublishEvent("card.reward.opened", new
         {
             cards = mapped,
+            signature,
             canSkip = true,
             source = "combat",
             context = new
@@ -954,6 +956,10 @@ internal sealed class GameBuddyWebSocketServer
                 if (message.Contains("request_snapshot", StringComparison.Ordinal))
                 {
                     if (_lastStateFrame is not null) await SendAsync(client, _lastStateFrame, cancellationToken);
+                }
+                else
+                {
+                    GameBuddyRewardOverlay.QueueImpactMessage(message);
                 }
             }
         }

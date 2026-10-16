@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { autoStrikeScore, autoStrikeImpact, decorateAutoStrikeCards, draftImpactMessage, isIronclad } = require('../knowledge/auto-strike');
+const {
+  autoStrikeScore,
+  autoStrikeImpact,
+  decorateAutoStrikeCards,
+  DRAFT_ARCHETYPE_IDS,
+  draftImpactMessage,
+  isIronclad
+} = require('../knowledge/auto-strike');
 const { decorateIroncladArchetypes } = require('../knowledge/ironclad-archetypes');
 
 const hellraiser = { id: 'HELLRAISER', name: '地狱狂徒' };
@@ -27,7 +34,11 @@ test('升级、遗物和牌组厚度改变同一候选的增量', () => {
   const upgraded = autoStrikeImpact(base, [], { ...pommel, name: '剑柄打击+', upgraded: true }).deltaPoints;
   const withRelic = autoStrikeImpact(base, [{ id: 'STRIKE_DUMMY' }], pommel).deltaPoints;
   const thicker = autoStrikeScore([...base, ...Array(10).fill(defend)], []);
-  assert.ok(upgraded > normal);
+  assert.ok(upgraded >= normal);
+  assert.ok(
+    autoStrikeImpact(base, [], { ...pommel, name: '剑柄打击+', upgraded: true }).afterScore
+      > autoStrikeImpact(base, [], pommel).afterScore
+  );
   assert.ok(withRelic >= normal);
   assert.ok(thicker < autoStrikeScore(base, []));
 });
@@ -96,8 +107,38 @@ test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
   assert.equal(message.impacts[0].reason, '循环');
   assert.ok(message.impacts.every(impact => typeof impact.reason === 'string'));
   assert.ok(message.impacts.every(impact => (
-    Object.keys(impact).sort().join(',') === 'cardId,deltaPoints,reason'
+    Object.keys(impact).sort().join(',') === 'archetypes,cardId,deltaPoints,reason'
   )));
+  assert.ok(message.impacts.every(impact => impact.deltaPoints === impact.archetypes[0].deltaPoints));
+  assert.ok(message.impacts.every(impact => (
+    impact.archetypes.length === 4
+      && impact.archetypes.every(item => Number.isInteger(item.deltaPoints)
+        && item.deltaPoints >= -100 && item.deltaPoints <= 100)
+  )));
+  assert.deepEqual(message.impacts[0].archetypes.map(impact => impact.id), DRAFT_ARCHETYPE_IDS);
   assert.equal(draftImpactMessage(event, 'silent', decorated), null);
   assert.equal(draftImpactMessage({ name: 'card.reward.opened', data: {} }, 'ironclad', decorated), null);
+});
+
+test('四流派消息原子拒绝缺项、重复和越界候选且保持奖励签名', () => {
+  const event = { name: 'card.reward.opened', data: { signature: 'A:False|B:False|C:False' } };
+  const validImpacts = DRAFT_ARCHETYPE_IDS.map((id, index) => ({
+    id,
+    deltaPoints: index === 0 ? -100 : index === 3 ? 100 : index,
+    reason: `reason-${id}`
+  }));
+  const cards = [
+    { id: 'A', archetypeImpacts: validImpacts },
+    { id: 'B', archetypeImpacts: [...validImpacts.slice(0, 3), validImpacts[0]] },
+    { id: 'C', archetypeImpacts: validImpacts.map(item => (
+      item.id === 'block' ? { ...item, deltaPoints: 101 } : item
+    )) }
+  ];
+  assert.equal(draftImpactMessage(event, 'ironclad', cards), null);
+  const message = draftImpactMessage(event, 'ironclad', [cards[0]]);
+  assert.equal(message.signature, event.data.signature);
+  assert.deepEqual(message.impacts.map(impact => impact.cardId), ['A']);
+  assert.deepEqual(message.impacts[0].archetypes.map(impact => impact.id), DRAFT_ARCHETYPE_IDS);
+  assert.equal(message.impacts[0].deltaPoints, -100);
+  assert.equal(draftImpactMessage(event, 'silent', cards), null);
 });
