@@ -232,33 +232,63 @@ const CONFIG = Object.freeze({
     setup: ['auto_gate', 'auto_loop'],
     setupMax: 10,
     relics: { STRIKE_DUMMY: 3, BAG_OF_PREPARATION: 3 },
-    cap: context => context.active.autoGate ? 100 : 10
+    gates: ['auto_gate'],
+    direct: ['auto_gate', 'auto_loop', 'auto_payoff', 'auto_ammo'],
+    peripheral: ['auto_support'],
+    started: ['auto_gate', ['auto_loop', 'auto_payoff', 'auto_ammo']],
+    mature: ['auto_gate', 'auto_loop', 'auto_payoff', 'auto_ammo'],
+    synergies: [
+      { groups: ['auto_gate', 'auto_loop'], maximum: 4 },
+      { groups: ['auto_gate', 'auto_ammo'], maximum: 4 },
+      { groups: ['auto_gate', 'auto_payoff'], maximum: 3 }
+    ]
   },
   exhaust: {
     axes: { exhaust_pain: 17.5, exhaust_draw: 17.5, exhaust_outlet: 20, exhaust_event: 15, exhaust_payoff: 20, exhaust_support: 10 },
     setup: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet'],
     setupMax: 0,
     relics: { CHARONS_ASHES: 4, PAPER_MONEY: 2 },
-    cap: context => context.active.exhaustGates === 0 ? 20 : context.active.exhaustGates === 1 ? 65 : 100
+    gates: ['exhaust_pain', 'exhaust_draw'],
+    direct: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet', 'exhaust_event', 'exhaust_payoff'],
+    peripheral: ['exhaust_support'],
+    started: [['exhaust_pain', 'exhaust_draw'], ['exhaust_outlet', 'exhaust_event']],
+    mature: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet', ['exhaust_event', 'exhaust_payoff']],
+    synergies: [
+      { groups: ['exhaust_pain', 'exhaust_outlet'], maximum: 3 },
+      { groups: ['exhaust_draw', 'exhaust_event'], maximum: 3 },
+      { groups: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet'], maximum: 5 }
+    ]
   },
   strength: {
     axes: { strength_source: 30, strength_multihit: 40, strength_throughput: 15, strength_balance: 15 },
     setup: ['strength_source', 'strength_multihit'],
     setupMax: 0,
     relics: { VAJRA: 5, GIRYA: 4 },
-    cap: context => context.active.strengthSource ? 100 : 20
+    gates: ['strength_source'],
+    direct: ['strength_source', 'strength_multihit', 'strength_balance'],
+    peripheral: ['strength_throughput'],
+    started: ['strength_source', ['strength_multihit', 'strength_balance']],
+    mature: ['strength_source', ['strength_multihit', 'strength_balance'], 'strength_throughput'],
+    synergies: [
+      { groups: ['strength_source', 'strength_multihit'], maximum: 8 },
+      { groups: ['strength_source', 'strength_balance'], maximum: 3 }
+    ]
   },
   block: {
     axes: { block_gate: 25, block_conversion: 30, block_source: 30, block_support: 15 },
     setup: ['block_gate', 'block_conversion', 'block_source'],
     setupMax: 0,
     relics: { ANCHOR: 3, CALIPERS: 4, ORICHALCUM: 2 },
-    cap: context => {
-      if (!context.active.blockGate && !context.active.blockConversion) return 20;
-      if (!context.active.blockGate) return 45;
-      if (!context.active.blockConversion) return 55;
-      return 100;
-    }
+    gates: ['block_gate'],
+    direct: ['block_gate', 'block_conversion', 'block_source'],
+    peripheral: ['block_support'],
+    started: ['block_gate', 'block_source'],
+    mature: ['block_gate', 'block_conversion', 'block_source'],
+    synergies: [
+      { groups: ['block_gate', 'block_source'], maximum: 5 },
+      { groups: ['block_gate', 'block_conversion'], maximum: 4 },
+      { groups: ['block_gate', 'block_conversion', 'block_source'], maximum: 5 }
+    ]
   }
 });
 
@@ -330,18 +360,18 @@ function conditionFactor(condition, context) {
   if (!condition) return 1;
   const active = context.active;
   return {
-    auto_gate_active: active.autoGate ? 1 : 0,
+    auto_gate_active: active.autoGate ? 1 : 0.25,
     auto_attack_package: active.autoAttackPackage ? 1 : 0.12,
     auto_exhaust_package: active.autoExhaustPackage ? 1 : 0.12,
     auto_vulnerable_package: active.autoVulnerablePackage ? 1 : 0.12,
     exhaust_any_gate: active.exhaustGates > 0 ? 1 : 0.2,
-    exhaust_both_gates: active.exhaustGates === 2 ? 1 : active.exhaustGates === 1 ? 0.35 : 0.1,
+    exhaust_both_gates: active.exhaustGates === 2 ? 1 : active.exhaustGates === 1 ? 0.5 : 0.2,
     exhaust_draw_active: active.exhaustGates > 0
       && context.groups.get('exhaust:exhaust_draw') > 0 ? 1 : 0.1,
-    strength_source_active: active.strengthSource ? 1 : 0.12,
+    strength_source_active: active.strengthSource ? 1 : 0.25,
     strength_vulnerable_package: active.strengthVulnerablePackage ? 1 : 0.12,
-    block_gate_active: active.blockGate ? 1 : 0.12,
-    block_conversion_active: active.blockConversion ? 1 : 0.12
+    block_gate_active: active.blockGate ? 1 : 0.25,
+    block_conversion_active: active.blockConversion ? 1 : 0.25
   }[condition];
 }
 
@@ -373,50 +403,110 @@ function saturated(maximum, amount) {
   return maximum * (1 - Math.exp(-1.35 * amount));
 }
 
-function scoreOne(key, deck, relics = []) {
+function hasGroup(context, key, group) {
+  return (context.groups.get(`${key}:${group}`) || 0) > 0;
+}
+
+function axesSatisfied(context, key, requirements) {
+  return requirements.every(requirement => Array.isArray(requirement)
+    ? requirement.some(group => hasGroup(context, key, group))
+    : hasGroup(context, key, requirement));
+}
+
+function peripheralFactor(key, config, context) {
+  const directCount = config.direct.filter(group => hasGroup(context, key, group)).length;
+  if (directCount === 0) return 0.08;
+  const gateActive = key === 'autoStrike' ? context.active.autoGate
+    : key === 'exhaust' ? context.active.exhaustGates > 0
+      : key === 'strength' ? context.active.strengthSource
+        : context.active.blockGate;
+  return gateActive ? 1 : 0.3;
+}
+
+function structuralFactor(key, group, context) {
+  if (key === 'exhaust' && group === 'exhaust_payoff') {
+    return context.active.exhaustGates === 2 ? 1 : context.active.exhaustGates === 1 ? 0.65 : 0.35;
+  }
+  if (key === 'block' && group === 'block_conversion') {
+    return context.active.blockGate ? 1 : 0.35;
+  }
+  return 1;
+}
+
+function scoreOneDetailed(key, deck, relics = []) {
   const context = buildDeckContext(deck);
   const config = CONFIG[key];
-  let score = 0;
-  let penalty = 0;
+  let baseAxisCoverage = 0;
+  let gateCoverage = 0;
+  let antiSynergy = 0;
   for (const [group, maximum] of Object.entries(config.axes)) {
     let amount = 0;
     for (const copy of context.copies) {
       const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id][key];
       if (cell.group !== group) continue;
-      const factor = conditionFactor(cell.condition, context);
+      const factor = conditionFactor(cell.condition, context)
+        * structuralFactor(key, group, context)
+        * (config.peripheral.includes(group) ? peripheralFactor(key, config, context) : 1);
       if (cell.weight >= 0) amount += cell.weight * copy.effective * factor;
-      else penalty += Math.abs(cell.weight) * 8 * copy.effective * factor;
+      else antiSynergy += Math.abs(cell.weight) * 8 * copy.effective * factor;
     }
-    score += saturated(maximum, amount);
+    const coverage = saturated(maximum, amount);
+    if (config.gates.includes(group)) gateCoverage += coverage;
+    else baseAxisCoverage += coverage;
   }
   const relicSet = new Set((relics || []).map(relicId).filter(Boolean));
+  let relevantRelics = 0;
   for (const [id, value] of Object.entries(config.relics)) {
-    if (relicSet.has(id)) score += value;
+    if (relicSet.has(id)) relevantRelics += value;
   }
   const extraDraw = relicSet.has('BAG_OF_PREPARATION') ? 2 : 0;
-  score += config.setupMax * setupReliability(context, key, config.setup, extraDraw);
   const setup = setupReliability(context, key, config.setup, extraDraw);
+  let synergyCompletion = config.setupMax * setup;
+  for (const synergy of config.synergies) {
+    if (synergy.groups.every(group => hasGroup(context, key, group))) {
+      const weakestAxis = Math.min(...synergy.groups.map(group => context.groups.get(`${key}:${group}`) || 0));
+      synergyCompletion += saturated(synergy.maximum, weakestAxis);
+    }
+  }
   const reliabilityFactor = 0.88 + 0.12 * setup;
-  score = score * reliabilityFactor - penalty;
-  score = Math.min(score, config.cap(context));
-  return Math.max(0, Math.min(100, score));
+  const dilution = (baseAxisCoverage + gateCoverage + synergyCompletion) * (1 - reliabilityFactor);
+  const raw = Math.max(0, Math.min(100,
+    baseAxisCoverage + gateCoverage + synergyCompletion + relevantRelics - antiSynergy - dilution));
+  return {
+    raw,
+    context,
+    components: {
+      baseAxisCoverage,
+      gateCoverage,
+      synergyCompletion,
+      relevantRelics,
+      antiSynergy,
+      dilution
+    }
+  };
+}
+
+function scoreOne(key, deck, relics = []) {
+  return scoreOneDetailed(key, deck, relics).raw;
 }
 
 function scoreIroncladArchetypes(deck, relics = []) {
   return ARCHETYPES.map(archetype => {
-    const score = Math.round(scoreOne(archetype.key, deck, relics));
+    const detail = scoreOneDetailed(archetype.key, deck, relics);
+    const score = Math.round(detail.raw);
+    const config = CONFIG[archetype.key];
     return {
       id: archetype.id,
       name: archetype.name,
       score,
-      started: score >= 15,
-      mature: score >= 65
+      started: score >= 15 && axesSatisfied(detail.context, archetype.key, config.started),
+      mature: score >= 65 && axesSatisfied(detail.context, archetype.key, config.mature)
     };
   });
 }
 
-function reasonFor(cell, deltaPoints) {
-  if (cell.role === 'neutral') return deltaPoints < 0 ? REASONS.dilution : REASONS.neutral;
+function reasonFor(cell, deltaPoints, rawDelta = deltaPoints) {
+  if (cell.role === 'neutral') return rawDelta < 0 ? REASONS.dilution : REASONS.neutral;
   return REASONS[cell.reasonCode];
 }
 
@@ -427,14 +517,24 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
   const after = scoreIroncladArchetypes([...(deck || []), candidate], relics);
   return ARCHETYPES.map((archetype, index) => {
     const cell = IRONCLAD_ARCHETYPE_MATRIX[id][archetype.key];
+    const rawBefore = scoreOne(archetype.key, deck, relics);
+    const rawAfter = scoreOne(archetype.key, [...(deck || []), candidate], relics);
+    const rawDelta = rawAfter - rawBefore;
+    let deltaPoints = Math.round(rawDelta);
+    const config = CONFIG[archetype.key];
+    const beforeContext = buildDeckContext(deck);
+    const firstDirectComponent = config.direct.includes(cell.group)
+      && !hasGroup(beforeContext, archetype.key, cell.group);
+    if (rawDelta > 0 && deltaPoints === 0 && firstDirectComponent) deltaPoints = 1;
+    if (Object.is(deltaPoints, -0)) deltaPoints = 0;
     return {
       id: archetype.id,
       name: archetype.name,
       beforeScore: before[index].score,
       afterScore: after[index].score,
-      deltaPoints: after[index].score - before[index].score,
+      deltaPoints,
       role: cell.role,
-      reason: reasonFor(cell, after[index].score - before[index].score),
+      reason: reasonFor(cell, deltaPoints, rawDelta),
       explicit: cell.role !== 'neutral'
     };
   });
@@ -462,7 +562,7 @@ function generateMatrixMarkdown() {
     '# 铁甲战士四流派完整评价矩阵',
     '',
     `> 数据版本：Codex 当前快照；卡牌数：${ironcladCards.length}；矩阵版本：1。`,
-    '> 流派度衡量构筑完整度与稳定度，不表示胜率。',
+    '> 流派度衡量距离完全体蓝图的结构完成度，不表示胜率或即时战力；started/mature 另行检查必要轴。',
     '',
     '| ID | 卡牌 | 自动打击 | 消耗引擎 | 力量叠加 | 格挡壁垒 |',
     '|---|---|---|---|---|---|'
@@ -472,7 +572,6 @@ function generateMatrixMarkdown() {
     const row = IRONCLAD_ARCHETYPE_MATRIX[card.id];
     lines.push(`| \`${card.id}\` | ${card.name} | ${label(row.autoStrike)} | ${label(row.exhaust)} | ${label(row.strength)} | ${label(row.block)} |`);
   }
-  lines.push('');
   return `${lines.join('\n')}\n`;
 }
 

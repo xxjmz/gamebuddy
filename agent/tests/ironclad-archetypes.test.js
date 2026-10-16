@@ -16,8 +16,11 @@ const {
 
 const defend = { id: 'DEFEND_IRONCLAD' };
 const filler = count => Array.from({ length: count }, () => ({ ...defend }));
+const neutral = count => Array.from({ length: count }, () => ({ id: 'MANGLE' }));
 const score = (deck, id, relics = []) => scoreIroncladArchetypes(deck, relics)
   .find(item => item.id === id).score;
+const state = (deck, id, relics = []) => scoreIroncladArchetypes(deck, relics)
+  .find(item => item.id === id);
 const impact = (deck, candidate, id) => impactIroncladArchetypes(deck, [], candidate)
   .find(item => item.id === id);
 
@@ -94,34 +97,93 @@ test('自动打击区分稳定支持、条件支持和真实软反', () => {
   assert.ok(impact(base, { id: 'BASH' }, 'auto_strike').deltaPoints > 0);
 });
 
-test('消耗引擎遵守零闸门、单闸门上限与双闸门协同', () => {
-  const noGate = [{ id: 'BURNING_PACT' }, { id: 'TRUE_GRIT' }, { id: 'FIEND_FIRE' }, ...filler(17)];
-  const oneGate = [{ id: 'FEEL_NO_PAIN' }, ...noGate];
-  const twoGates = [{ id: 'DARK_EMBRACE' }, ...oneGate, { id: 'STOKE' }];
-  assert.ok(score(noGate, 'exhaust') <= 20);
-  assert.ok(score(oneGate, 'exhaust') <= 65);
-  assert.ok(score(twoGates, 'exhaust') > score(oneGate, 'exhaust'));
-  assert.notEqual(impact(twoGates, { id: 'CORRUPTION' }, 'exhaust').role, 'hardPoison');
+test('初始牌组的自动打击弹药先积累潜力，闸门再释放协同', () => {
+  const starter = [
+    ...Array.from({ length: 5 }, () => ({ id: 'STRIKE_IRONCLAD' })),
+    ...filler(4),
+    { id: 'BASH' }
+  ];
+  const twin = impact(starter, { id: 'TWIN_STRIKE' }, 'auto_strike').deltaPoints;
+  const taunt = impact(starter, { id: 'TAUNT' }, 'auto_strike').deltaPoints;
+  const blankGate = impact(neutral(10), { id: 'HELLRAISER' }, 'auto_strike').deltaPoints;
+  const componentGate = impact(
+    [{ id: 'TWIN_STRIKE' }, { id: 'POMMEL_STRIKE' }, ...neutral(8)],
+    { id: 'HELLRAISER' },
+    'auto_strike'
+  ).deltaPoints;
+  assert.ok(twin > 0 && twin >= taunt);
+  assert.ok(componentGate > blankGate);
+  assert.equal(state([...starter, { id: 'TWIN_STRIKE' }], 'auto_strike').started, false);
 });
 
-test('力量流无来源受限，力量来源加多段显著成型并递减', () => {
-  const noSource = [{ id: 'TWIN_STRIKE' }, { id: 'WHIRLWIND' }, { id: 'CONFLAGRATION' }, ...filler(17)];
-  const active = [{ id: 'INFLAME' }, ...noSource];
-  assert.ok(score(noSource, 'strength') <= 20);
-  assert.ok(score(active, 'strength') > score(noSource, 'strength') + 20);
-  const first = impact([{ id: 'INFLAME' }, ...filler(18)], { id: 'CONFLAGRATION' }, 'strength').deltaPoints;
-  const second = impact([{ id: 'INFLAME' }, { id: 'CONFLAGRATION' }, ...filler(18)], { id: 'CONFLAGRATION' }, 'strength').deltaPoints;
-  assert.ok(first > second && second > 0);
+test('消耗出口、事件和兑现无闸门仍正向，双闸门逐级放大', () => {
+  const noGate = neutral(10);
+  const oneGate = [{ id: 'FEEL_NO_PAIN' }, ...neutral(9)];
+  const twoGates = [{ id: 'FEEL_NO_PAIN' }, { id: 'DARK_EMBRACE' }, ...neutral(8)];
+  for (const id of ['BURNING_PACT', 'FIEND_FIRE', 'PACTS_END']) {
+    const none = impact(noGate, { id }, 'exhaust').deltaPoints;
+    const one = impact(oneGate, { id }, 'exhaust').deltaPoints;
+    const two = impact(twoGates, { id }, 'exhaust').deltaPoints;
+    assert.ok(none > 0, `${id} should retain potential without gates`);
+    assert.ok(one >= none, `${id} should not lose value with one gate`);
+    assert.ok(two > one, `${id} should gain value with both gates`);
+  }
+  assert.equal(state([
+    { id: 'BURNING_PACT' }, { id: 'FIEND_FIRE' }, { id: 'PACTS_END' }, ...neutral(7)
+  ], 'exhaust').started, false);
 });
 
-test('格挡流分别限制无闸门和无转化，完整三轴最高', () => {
-  const wallOnly = [{ id: 'BARRICADE' }, { id: 'UNMOVABLE' }, { id: 'IMPERVIOUS' }, { id: 'BLOOD_WALL' }, ...filler(16)];
-  const conversionOnly = [{ id: 'BODY_SLAM' }, { id: 'JUGGERNAUT' }, { id: 'IMPERVIOUS' }, { id: 'BLOOD_WALL' }, ...filler(16)];
-  const complete = [{ id: 'BARRICADE' }, { id: 'BODY_SLAM' }, { id: 'JUGGERNAUT' }, { id: 'IMPERVIOUS' }, { id: 'BLOOD_WALL' }, ...filler(15)];
-  assert.ok(score(wallOnly, 'block') <= 55);
-  assert.ok(score(conversionOnly, 'block') <= 45);
+test('力量多段无来源仍正向，有来源更高且重复递减', () => {
+  const noSource = impact(neutral(10), { id: 'CONFLAGRATION' }, 'strength').deltaPoints;
+  const withSourceDeck = [{ id: 'INFLAME' }, ...neutral(9)];
+  const withSource = impact(withSourceDeck, { id: 'CONFLAGRATION' }, 'strength').deltaPoints;
+  const repeated = impact(
+    [...withSourceDeck, { id: 'CONFLAGRATION' }],
+    { id: 'CONFLAGRATION' },
+    'strength'
+  ).deltaPoints;
+  assert.ok(noSource > 0);
+  assert.ok(withSource > noSource);
+  assert.ok(withSource > repeated && repeated > 0);
+  const missingSource = state([
+    { id: 'TWIN_STRIKE' }, { id: 'WHIRLWIND' }, { id: 'CONFLAGRATION' }, ...neutral(7)
+  ], 'strength');
+  assert.ok(missingSource.score > 20, 'missing gate must not hard-cap collected components');
+  assert.equal(missingSource.started, false);
+  assert.equal(missingSource.mature, false);
+});
+
+test('格挡来源和转伤先积累潜力，闸门与三轴组合最高', () => {
+  const noGate = neutral(10);
+  assert.ok(impact(noGate, { id: 'IMPERVIOUS' }, 'block').deltaPoints > 0);
+  assert.ok(impact(noGate, { id: 'BODY_SLAM' }, 'block').deltaPoints > 0);
+  const wallOnly = [{ id: 'BARRICADE' }, { id: 'IMPERVIOUS' }, { id: 'BLOOD_WALL' }, ...neutral(7)];
+  const conversionOnly = [{ id: 'BODY_SLAM' }, { id: 'JUGGERNAUT' }, { id: 'IMPERVIOUS' }, ...neutral(7)];
+  const complete = [
+    { id: 'BARRICADE' }, { id: 'BODY_SLAM' }, { id: 'JUGGERNAUT' },
+    { id: 'IMPERVIOUS' }, { id: 'BLOOD_WALL' }, ...neutral(5)
+  ];
   assert.ok(score(complete, 'block') > score(wallOnly, 'block'));
   assert.ok(score(complete, 'block') > score(conversionOnly, 'block'));
+  assert.equal(state(conversionOnly, 'block').started, false);
+  assert.equal(state(conversionOnly, 'block').mature, false);
+});
+
+test('候选用 raw 差取整，首个正向结构组件有下限但重复和净负不保底', () => {
+  const first = impact(neutral(60), { id: 'FIEND_FIRE' }, 'exhaust');
+  assert.ok(first.deltaPoints >= 1);
+  let repeatedDeck = [{ id: 'TWIN_STRIKE' }, ...neutral(10)];
+  let repeated = impact(repeatedDeck, { id: 'TWIN_STRIKE' }, 'auto_strike');
+  for (let count = 0; count < 20 && repeated.deltaPoints > 0; count += 1) {
+    repeatedDeck = [{ id: 'TWIN_STRIKE' }, ...repeatedDeck];
+    repeated = impact(repeatedDeck, { id: 'TWIN_STRIKE' }, 'auto_strike');
+  }
+  assert.ok(repeated.deltaPoints <= 0);
+  assert.ok(impact(
+    [{ id: 'HELLRAISER' }, { id: 'POMMEL_STRIKE' }, ...neutral(10)],
+    { id: 'ANGER' },
+    'auto_strike'
+  ).deltaPoints < 0);
 });
 
 test('候选输出四条 impacts 与四条 scores，非铁甲不装饰', () => {
