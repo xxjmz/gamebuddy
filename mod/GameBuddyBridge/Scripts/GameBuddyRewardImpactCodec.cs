@@ -60,7 +60,7 @@ internal static class GameBuddyRewardImpactCodec
         var name = (useChinese ? ChineseNames : EnglishNames)[index];
         var sign = impact.DeltaPoints > 0 ? "+" : string.Empty;
         if (impact.BeforeScore is int before)
-            return $"{name} {before}% {sign}{impact.DeltaPoints}";
+            return $"{name} {FormatProgress(before, impact.DeltaPoints)}";
         return $"{name} {sign}{impact.DeltaPoints}%";
     }
 
@@ -117,6 +117,12 @@ internal static class GameBuddyRewardImpactCodec
         impact = new DraftCardImpact(cardId, legacyDelta, legacyReason, ordered);
         return true;
     }
+
+    internal static string FormatProgress(int before, int delta) =>
+        delta == 0 ? before.ToString() : $"{before}{(delta > 0 ? "+" : string.Empty)}{delta}";
+
+    internal static string FormatSignedDelta(int delta) =>
+        delta > 0 ? $"+{delta}" : delta.ToString();
 
     private static bool IsAllowedDelta(int delta) => delta is >= -100 and <= 100;
 }

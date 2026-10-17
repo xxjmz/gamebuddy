@@ -89,10 +89,13 @@ Assert(GameBuddyRewardImpactCodec.FormatLine(new("exhaust", -2, null), false) ==
     "English negative formatting is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatLine(new("block", 0, null), true) == "格挡壁垒 0%",
     "Zero formatting is incorrect.");
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("auto_strike", 8, null, 9), true) == "自动打击 9% +8",
-    "Current percentage formatting is incorrect.");
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("strength", -2, null, 18), true) == "力量叠加 18% -2",
-    "Negative current percentage formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("auto_strike", 14, null, 42), true) == "自动打击 42+14",
+    "Current score plus delta formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("strength", -2, null, 18), true) == "力量叠加 18-2",
+    "Negative current score formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatProgress(42, 0) == "42", "Zero delta should keep the current score only.");
+Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(14) == "+14", "Positive delta sign is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(-2) == "-2", "Negative delta sign is incorrect.");
 var withScore = ValidArchetypes();
 withScore[0] = Archetype("auto_strike", 8, 9);
 Assert(GameBuddyRewardImpactCodec.TryParse(Message(Card("ANGER", 8, withScore)), out var scored)

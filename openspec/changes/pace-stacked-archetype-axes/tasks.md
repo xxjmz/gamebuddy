@@ -15,3 +15,4 @@
 ## 4. 游戏内流派框
 
 - [x] 4.1 把 `beforeScore` 放进 `draft_impact`，游戏内四行改为「名称 当前% 变化」，面板改成铜铁边。运行 `node --test agent/tests/auto-strike.test.js` 与 `dotnet run --project mod/GameBuddyBridge.Tests`，并把新的 `gamebuddy_bridge.dll` 装进本地游戏。
+- [x] 4.2 游戏内只在牌列正中上方放一块铜铁面板。未指向卡牌时只显示当前分；指向某张牌时，同一行把增量写成 `42+14` 或 `18-2`，增量使用另一种颜色。运行 codec 测试并重新安装 DLL。
