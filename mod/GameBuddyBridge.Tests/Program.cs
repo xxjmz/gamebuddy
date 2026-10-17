@@ -173,3 +173,38 @@ Assert(GameBuddyRewardCandidateSelector.Resolve([Probe("LEFT"), Probe("RIGHT")],
     "No hover, focus, or click must resolve to no candidate.");
 
 Console.WriteLine("GameBuddy reward impact codec tests passed.");
+
+var saveLoadDirectory = Directory.CreateTempSubdirectory("gamebuddy-save-loads").FullName;
+var firstLoad = DateTimeOffset.Parse("2026-10-17T14:00:00Z");
+var secondLoad = DateTimeOffset.Parse("2026-10-17T14:05:00Z");
+Assert(GameBuddySaveLoadLog.Record(saveLoadDirectory, firstLoad), "First save-load record failed.");
+Assert(GameBuddySaveLoadLog.Record(saveLoadDirectory, secondLoad), "Second save-load record failed.");
+using (var saved = JsonDocument.Parse(File.ReadAllText(Path.Combine(saveLoadDirectory, GameBuddySaveLoadLog.FileName))))
+{
+    Assert(saved.RootElement.GetProperty("schema").GetString() == GameBuddySaveLoadLog.Schema,
+        "Save-load schema was not written.");
+    Assert(saved.RootElement.GetProperty("count").GetInt32() == 2, "Save-load count was not 2.");
+    var loads = saved.RootElement.GetProperty("loads").EnumerateArray().ToArray();
+    Assert(loads.Length == 2 && loads[0].GetProperty("seq").GetInt32() == 1 && loads[1].GetProperty("seq").GetInt32() == 2,
+        "Save-load sequence numbers were not distinct.");
+    var firstText = loads[0].GetProperty("at").GetString() ?? throw new InvalidOperationException("Save-load timestamp was missing.");
+    var secondText = loads[1].GetProperty("at").GetString() ?? throw new InvalidOperationException("Save-load timestamp was missing.");
+    var firstAt = DateTimeOffset.Parse(firstText);
+    var secondAt = DateTimeOffset.Parse(secondText);
+    Assert(firstAt.Offset == TimeSpan.Zero && secondAt > firstAt, "Save-load timestamps were not distinct UTC values.");
+    foreach (var name in new[] { "seed", "playerName", "path", "account" })
+        Assert(!saved.RootElement.TryGetProperty(name, out _), $"Save-load file stored {name}.");
+}
+
+var corruptDirectory = Directory.CreateTempSubdirectory("gamebuddy-save-loads-corrupt").FullName;
+File.WriteAllText(Path.Combine(corruptDirectory, GameBuddySaveLoadLog.FileName), "{not-json");
+Assert(GameBuddySaveLoadLog.Record(corruptDirectory, firstLoad), "Record after corrupt JSON failed.");
+using (var recovered = JsonDocument.Parse(File.ReadAllText(Path.Combine(corruptDirectory, GameBuddySaveLoadLog.FileName))))
+    Assert(recovered.RootElement.GetProperty("count").GetInt32() == 1, "Corrupt save-load file was not replaced.");
+
+var blocker = Path.Combine(Path.GetTempPath(), "gamebuddy-save-load-blocker-" + Guid.NewGuid().ToString("N"));
+File.WriteAllText(blocker, "not-a-directory");
+Assert(!GameBuddySaveLoadLog.Record(Path.Combine(blocker, "child"), firstLoad),
+    "Unwritable save-load directory was reported as saved.");
+
+Console.WriteLine("GameBuddy save-load log tests passed.");

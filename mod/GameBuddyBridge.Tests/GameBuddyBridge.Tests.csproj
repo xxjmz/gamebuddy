@@ -10,6 +10,7 @@
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardImpactCodec.cs" Link="GameBuddyRewardImpactCodec.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardCandidateSelector.cs" Link="GameBuddyRewardCandidateSelector.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardSelectionTracker.cs" Link="GameBuddyRewardSelectionTracker.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddySaveLoadLog.cs" Link="GameBuddySaveLoadLog.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 </Project>
