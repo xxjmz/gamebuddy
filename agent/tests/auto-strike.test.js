@@ -34,11 +34,7 @@ test('升级、遗物和牌组厚度改变同一候选的增量', () => {
   const upgraded = autoStrikeImpact(base, [], { ...pommel, name: '剑柄打击+', upgraded: true }).deltaPoints;
   const withRelic = autoStrikeImpact(base, [{ id: 'STRIKE_DUMMY' }], pommel).deltaPoints;
   const thicker = autoStrikeScore([...base, ...Array(10).fill(defend)], []);
-  assert.ok(upgraded >= normal);
-  assert.ok(
-    autoStrikeImpact(base, [], { ...pommel, name: '剑柄打击+', upgraded: true }).afterScore
-      > autoStrikeImpact(base, [], pommel).afterScore
-  );
+  assert.ok(upgraded > normal);
   assert.ok(withRelic >= normal);
   assert.ok(thicker < autoStrikeScore(base, []));
 });

@@ -386,16 +386,34 @@ function noCopiesInDraw(deckSize, copies, draws) {
 }
 
 function setupReliability(context, key, groups, extraDraw = 0) {
-  const counts = groups.map(group => {
-    let total = 0;
-    for (const copy of context.copies) {
-      if (IRONCLAD_ARCHETYPE_MATRIX[copy.id][key].group === group) total += 1;
-    }
-    return total;
-  });
-  if (counts.some(count => count === 0) || context.size === 0) return 0;
+  return requirementReliability(context, key, groups, extraDraw);
+}
+
+function requirementReliability(context, key, requirements, extraDraw = 0) {
+  if (!requirements.length || context.size === 0) return 0;
+  const normalized = requirements.map(requirement => (
+    Array.isArray(requirement) ? requirement : [requirement]
+  ));
+  const counts = normalized.map(groups => context.copies.reduce((total, copy) => {
+    const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id][key];
+    return groups.includes(cell.group) && cell.weight > 0 ? total + 1 : total;
+  }, 0));
+  if (counts.some(count => count === 0)) return 0;
   const draws = Math.min(context.size, 10 + extraDraw);
-  return counts.reduce((product, count) => product * (1 - noCopiesInDraw(context.size, count, draws)), 1);
+  let probability = 0;
+  const subsetCount = 1 << counts.length;
+  for (let mask = 0; mask < subsetCount; mask += 1) {
+    let missingCopies = 0;
+    let bits = 0;
+    for (let index = 0; index < counts.length; index += 1) {
+      if ((mask & (1 << index)) === 0) continue;
+      missingCopies += counts[index];
+      bits += 1;
+    }
+    const term = noCopiesInDraw(context.size, missingCopies, draws);
+    probability += bits % 2 === 0 ? term : -term;
+  }
+  return Math.max(0, Math.min(1, probability));
 }
 
 const STACK_GROUPS = new Set([
@@ -481,13 +499,18 @@ function scoreOneDetailed(key, deck, relics = []) {
       synergyCompletion += saturated(synergy.maximum, weakestAxis) * stackFullness(context, key, synergy.groups);
     }
   }
-  const reliabilityFactor = 0.88 + 0.12 * setup;
-  const dilution = (baseAxisCoverage + gateCoverage + synergyCompletion) * (1 - reliabilityFactor);
-  const raw = Math.max(0, Math.min(100,
-    baseAxisCoverage + gateCoverage + synergyCompletion + relevantRelics - antiSynergy - dilution));
+  const blueprintScore = Math.max(0, Math.min(100,
+    baseAxisCoverage + gateCoverage + synergyCompletion + relevantRelics - antiSynergy));
+  const potentialFloor = 0.35;
+  const formationFactor = potentialFloor + (1 - potentialFloor) * setup;
+  const raw = Math.max(0, Math.min(100, blueprintScore * formationFactor));
+  const dilution = blueprintScore - raw;
   return {
     raw,
     context,
+    consistency: setup,
+    blueprintScore,
+    extraDraw,
     components: {
       baseAxisCoverage,
       gateCoverage,
@@ -508,12 +531,33 @@ function scoreIroncladArchetypes(deck, relics = []) {
     const detail = scoreOneDetailed(archetype.key, deck, relics);
     const score = Math.round(detail.raw);
     const config = CONFIG[archetype.key];
+    const startedConsistency = requirementReliability(
+      detail.context,
+      archetype.key,
+      config.started,
+      detail.extraDraw
+    );
+    const formedConsistency = requirementReliability(
+      detail.context,
+      archetype.key,
+      config.mature,
+      detail.extraDraw
+    );
+    const started = score >= 15
+      && startedConsistency >= 0.25
+      && axesSatisfied(detail.context, archetype.key, config.started);
+    const mature = score >= 65
+      && formedConsistency >= 0.6
+      && axesSatisfied(detail.context, archetype.key, config.mature);
     return {
       id: archetype.id,
       name: archetype.name,
       score,
-      started: score >= 15 && axesSatisfied(detail.context, archetype.key, config.started),
-      mature: score >= 65 && axesSatisfied(detail.context, archetype.key, config.mature)
+      blueprintScore: Math.round(detail.blueprintScore),
+      consistency: Math.round(detail.consistency * 100),
+      stage: mature ? 'formed' : started ? 'started' : 'unformed',
+      started,
+      mature
     };
   });
 }
@@ -539,6 +583,7 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
     const firstDirectComponent = config.direct.includes(cell.group)
       && !hasGroup(beforeContext, archetype.key, cell.group);
     if (rawDelta > 0 && deltaPoints === 0 && firstDirectComponent) deltaPoints = 1;
+    if (rawDelta < 0 && deltaPoints === 0 && cell.weight < 0) deltaPoints = -1;
     if (Object.is(deltaPoints, -0)) deltaPoints = 0;
     return {
       id: archetype.id,
