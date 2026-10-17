@@ -8,6 +8,7 @@
 - 将轴覆盖与抽取稳定性共同纳入成型判定；厚牌和全卡杂牌堆不得仅靠组件累计进入成熟状态。
 - 为当前流派显示“未启动 / 已启动 / 已成型”阶段，并在候选牌跨越阶段时明确提示“启动”或“成型”。
 - 候选牌仍显示当前进度与变化，但优先突出补齐缺失结构轴和阶段跃迁，而不是只比较数值大小。
+- 玩家实际拿下造成阶段跃迁的牌后，以一次克制的铜色反馈和桌宠短句确认“这套牌开始转起来了”；普通加分不触发庆祝。
 - 修正游戏内候选定位：悬停实时预览，点击候选可锁定查看，再次悬停其他候选可预览；不得拦截或改变游戏原有选牌。
 - 增加起始牌组、成熟构筑、厚牌杂牌堆和混合构筑的回归基准，并完成一次真实奖励页验收。
 
@@ -25,8 +26,8 @@
 
 - `agent/knowledge/ironclad-archetypes.js`：评分分解、稳定性和阶段判定。
 - `agent/knowledge/auto-strike.js`、`harness/protocol.js`：候选前后阶段及缺失轴提示。
-- `mod/GameBuddyBridge/Scripts/GameBuddyRewardImpactCodec.cs`、`GameBuddyRewardOverlay.cs`：构筑点展示、阶段跃迁和候选锁定交互。
-- `src/archetype-ui.js`：桌面端保持同一术语与阶段语义。
+- `mod/GameBuddyBridge/Scripts/GameBuddyExporter.cs`、`GameBuddyRewardImpactCodec.cs`、`GameBuddyRewardOverlay.cs`：确认实际拿牌、构筑点展示、阶段跃迁和候选锁定交互。
+- `main.js`、`src/pet.js`、`src/archetype-ui.js`：桌面端保持同一术语与阶段语义，并播放一次确定性成型反馈。
 - Agent、Harness、Mod 测试与实机验收记录。
 
 ## Non-goals
