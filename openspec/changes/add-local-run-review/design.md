@@ -2,7 +2,7 @@
 
 见 `proposal.md`。当前 Bridge 连续发送 `gamebuddy.state.v1` 状态和战斗/奖励/火堆等局部事件，但没有稳定 `runId`、明确整局结束事件或长期汇总。Electron 已在主进程使用 `app.getPath('userData')` 保存桌宠偏好；已有 `recordDecision` 写入工作目录 `runs/`，不适合面向玩家的安装版历史。四流派评分仅覆盖铁甲，不能作为全角色通用画像。
 
-参考图的核心结构是“左侧角色身份 + 右上五星图 + 右下近期统计”，不是要复制其中的第三方角色、Logo 或具体指标。复盘页需要保留该信息结构和明亮街机视觉，同时使用 GameBuddy 自有资产和《杀戮尖塔 2》数据。
+参考图的页面结构和视觉语言直接作为实现模板：黄色纹样背景、左侧单一主角色、右上五星图、右下蓝青数据区和纵向滚动。只替换为 GameBuddy 与《杀戮尖塔 2》的角色和对局数据，不复制其中的第三方角色与 Logo；页面不再增加设计说明、数据链路或副角色区。
 
 ## Goals / Non-Goals
 
@@ -43,6 +43,8 @@ run.ended   { runId, result, act, floor, playtimeSeconds? }
 为复盘补充或强化以下事实：
 
 - `combat.started/ended`：`roomType`、敌人列表、胜负、回合数、开始/结束生命。
+- 回合伤害：按同一回合敌人生命的可确认下降累计，保存本局 `maxTurnDamage`；无法观察的溢出伤害不猜测。
+- Boss：持续保存地图计划的 `nextBossId/name`，实际进入 Boss 战后以最终遭遇的 Boss ID/name 覆盖。
 - `card.played`：卡牌 ID、类型；只统计类型已知的打出。
 - `card.reward.closed/selected`：明确拿取或跳过，未知结果单列。
 - `rest.closed`：`HEAL`、`SMITH` 或 `UNKNOWN`。
@@ -82,6 +84,7 @@ progress:
   finalAct, finalFloor, playtimeSeconds?, progressPercent
 finalState:
   hp, maxHp, gold, deck[], relics[], potions[], deckSize
+  finalBossId?, finalBossName?, maxTurnDamage?
 counters:
   combats, normalCombats, eliteEntries, eliteWins, bossEntries,
   typedCardsPlayed, attacksPlayed,
@@ -161,14 +164,13 @@ campUpgrade = 100 × smiths / (smiths + heals + otherKnownRestActions)
 
 每条同时显示百分比和 `分子/分母`；平均值显示“均值 · N局”。没有数据时显示“暂无”，不画 0% 蓝条。
 
-### 5. 主角色和副角色按使用频率确定
+### 5. 页面只展示一个主角色
 
 统计窗口是全角色最近 50 局：
 
 - 主角色：局数最多者；并列时最近使用者优先。
-- 副角色：其余角色按局数和最近时间排序，全部可点击。
 - 左上蓝色胶囊显示全窗口 `胜局 / 有结果局数`，旁边显示放弃数。
-- 点击副角色只切换角色大图、五星图、统计条和角色总结；全窗口战绩保持不变。
+- 五星图和统计条固定展示主角色最近最多 50 局的数据，不提供副角色切换入口。
 
 角色素材使用可替换 provider：
 
@@ -184,9 +186,10 @@ campUpgrade = 100 × smiths / (smiths + heals + otherKnownRestActions)
 
 - 背景：暖黄色底，叠加低对比度 GameBuddy 方脸重复纹样和浅色速度线。
 - 左上：圆角蓝色大胶囊，黄色大号胜局数字、白色总局数。
-- 左列约 48%：`主角色` 横条、4:5 大图框；底部 `副角色` 横条和方形缩略图。
+- 左列约 48%：`主角色` 横条和占满左列主体的 4:5 大图框；不显示副角色。
 - 右列约 52%：上半区五边形蓝色网格、蓝色外轮廓、青色半透明数据面；五个中文轴名环绕顶点。
-- 右下：`最近的50场对局` 横条、五条蓝底/青色填充统计条、右侧蓝色滚动条；继续向下滚动是最近一局和历史列表。
+- 右下：`最近的50场对局` 横条、五条蓝底/青色填充统计条、右侧蓝色滚动条；统计条下方直接接最近游戏记录。
+- 最近记录每行固定显示角色头像/名称、`通关/未通关/中断`、关底 Boss、最终楼层和最高单回合伤害；字段未知显示“未知”。
 - 字体：使用现有系统中文字体；数字加粗，棕橙色标签，蓝/青仅用于数据图形。
 - 动效：切换角色时数据面 180ms 过渡；尊重 `prefers-reduced-motion`，不做粒子或闪烁。
 
@@ -194,23 +197,7 @@ campUpgrade = 100 × smiths / (smiths + heals + otherKnownRestActions)
 
 五星图使用原生 SVG，不引入图表库：五个同心多边形、五条轴线和一个数据多边形即可满足需求，便于测试坐标、无数据轴和辅助文本。
 
-### 7. 内容生成只使用确定性模板
-
-角色总结按以下顺序生成 1–3 句：
-
-1. 样本句：`最近 N 局中，你有 X 局使用铁甲战士。`
-2. 倾向句：有效轴最高值比有效轴中位数至少高 12 点时，描述最高轴；否则写“近期风格较均衡”。
-3. 复盘句：比较最近 10 局与前 10 局的平均进度，只描述“上升/接近/下降”，不归因。
-
-铁甲最近一局额外复用流派评分，记录最终分、峰值和首次跨 60 的楼层，示例：
-
-```text
-消耗流在第 18 层启动，最终 73 点；格挡流最高 59 点，尚未闭合。
-```
-
-其他角色省略流派句。规则不调用 LLM，保证离线、可复现和可测试。
-
-### 8. Renderer 只读，文件能力留在主进程
+### 7. Renderer 只读，文件能力留在主进程
 
 主进程负责仓库、聚合、导出和清空；preload 只暴露窄 IPC：
 
