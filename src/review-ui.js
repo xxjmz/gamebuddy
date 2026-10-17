@@ -108,16 +108,15 @@
     const safe = dashboard || { window: {}, axes: [], stats: [], recentRuns: [] };
     const character = safe.mainCharacter || 'ironclad';
     return `
-      <section class="review-page" aria-label="我的复盘">
+      <section class="review-page" aria-label="个人数据">
         <div class="review-pattern" aria-hidden="true"></div>
         <header class="review-header">
           <div class="review-score-pill">
             <span class="review-score-number">${safe.window?.wins || 0}</span>
             <span class="review-score-copy">胜局<small>/ ${safe.window?.wins + safe.window?.losses || 0} 局有结果</small></span>
           </div>
-          <div class="review-brand"><strong>GAMEBUDDY</strong><span>本地玩家复盘</span></div>
+          <div class="review-brand"><strong>GAMEBUDDY</strong><span>个人数据</span></div>
           <div class="review-actions">
-            <button type="button" id="review-exit">返回工作台</button>
             <span>仅保存在本机</span>
             <button type="button" id="review-export">导出</button>
             <button type="button" id="review-clear">清空</button>

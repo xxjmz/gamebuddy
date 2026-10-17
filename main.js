@@ -22,6 +22,7 @@ const BRIDGE_URL = process.env.GAMEBUDDY_BRIDGE_URL || 'ws://127.0.0.1:27182';
 const BRIDGE_MODE = process.env.GAMEBUDDY_BRIDGE_MODE === 'replay' ? 'replay' : 'game';
 const archetypeMilestones = createArchetypeMilestoneTracker();
 let mainWindow;
+let reviewWindow;
 let petWindow;
 let danmakuWindow;
 let tray;
@@ -265,8 +266,8 @@ function broadcast(channel, payload) {
 }
 
 function publishReviewChanged() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('review:changed', reviewService.getDashboard());
+  if (reviewWindow && !reviewWindow.isDestroyed()) {
+    reviewWindow.webContents.send('review:changed', reviewService.getDashboard());
   }
 }
 
@@ -597,7 +598,7 @@ function showPetContextMenu(point) {
     click: () => selectPetSkin(skin.id, 'manual')
   }));
   const menu = Menu.buildFromTemplate([
-    { label: '打开 GameBuddy', click: () => { mainWindow?.show(); keepPetVisible(); } },
+    { label: '个人数据', click: () => { showPersonalData(); keepPetVisible(); } },
     {
       label: `思考模式：${llmThinkingEnabled ? '开' : '关'}`,
       enabled: llmConfig.enabled,
@@ -756,6 +757,42 @@ function createMainWindow() {
   });
 }
 
+function createReviewWindow() {
+  if (reviewWindow && !reviewWindow.isDestroyed()) {
+    reviewWindow.show();
+    reviewWindow.focus();
+    return reviewWindow;
+  }
+
+  reviewWindow = new BrowserWindow({
+    width: 1280,
+    height: 860,
+    minWidth: 1120,
+    minHeight: 720,
+    backgroundColor: '#f5bd19',
+    title: 'GameBuddy · 个人数据',
+    frame: false,
+    autoHideMenuBar: true,
+    titleBarStyle: 'hidden',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  reviewWindow.loadFile(path.join(__dirname, 'src', 'review.html'));
+  reviewWindow.webContents.on('did-finish-load', publishReviewChanged);
+  reviewWindow.on('closed', () => { reviewWindow = undefined; });
+  return reviewWindow;
+}
+
+function showPersonalData() {
+  const window = createReviewWindow();
+  window.show();
+  window.focus();
+}
+
 function createPetWindow() {
   petWindow = new BrowserWindow({
     width: 320,
@@ -846,7 +883,7 @@ function createTray() {
   tray = new Tray(nativeImage.createEmpty());
   tray.setToolTip('GameBuddy · 杀戮尖塔 2 AI 搭子');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开 GameBuddy', click: () => mainWindow?.show() },
+    { label: '个人数据', click: showPersonalData },
     { label: '显示 / 隐藏桌面宠物', click: () => {
       petHiddenByUser = petWindow?.isVisible() === true;
       if (petHiddenByUser) hidePet();
@@ -863,11 +900,13 @@ ipcMain.on('window-minimize', event => {
 });
 
 ipcMain.on('window-close', event => {
-  BrowserWindow.fromWebContents(event.sender)?.hide();
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window === reviewWindow) window.destroy();
+  else window?.hide();
 });
 
 ipcMain.on('open-main-window', () => {
-  mainWindow?.show();
+  showPersonalData();
   keepPetVisible();
 });
 ipcMain.on('toggle-pet', () => {
@@ -922,7 +961,7 @@ ipcMain.on('clear-llm-log', () => clearLlmLog());
 ipcMain.handle('get-observation', () => currentObservation());
 ipcMain.handle('review:getDashboard', () => reviewService.getDashboard());
 ipcMain.handle('review:export', async () => {
-  const result = await dialog.showSaveDialog(mainWindow, {
+  const result = await dialog.showSaveDialog(reviewWindow, {
     title: '导出 GameBuddy 本地复盘',
     defaultPath: `gamebuddy-review-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: 'JSON', extensions: ['json'] }]
@@ -960,7 +999,6 @@ ipcMain.handle('refresh-recommendation', async () => {
 app.whenReady().then(() => {
   readPetPreferences();
   applyCharacterSkin(observationStore.getState()?.run?.character);
-  createMainWindow();
   createPetWindow();
   createDanmakuWindow();
   createTray();
@@ -976,8 +1014,7 @@ app.whenReady().then(() => {
   screen.on('display-added', syncDanmakuWindowBounds);
   screen.on('display-removed', syncDanmakuWindowBounds);
   app.on('activate', () => {
-    if (!mainWindow || mainWindow.isDestroyed()) createMainWindow();
-    mainWindow.show();
+    showPersonalData();
   });
 });
 
