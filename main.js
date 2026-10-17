@@ -9,6 +9,7 @@ const { decide } = require('./agent/router');
 const { recordDecision } = require('./agent/recorder');
 const { decorateIroncladArchetypes } = require('./agent/knowledge/ironclad-archetypes');
 const { draftImpactMessage } = require('./agent/knowledge/auto-strike');
+const { createArchetypeMilestoneTracker } = require('./src/archetype-milestone');
 const { encounterGuideSignature, buildEncounterGuide } = require('./agent/tasks/encounter-guide');
 const { DanmakuBridgeAdapter } = require('./agent/danmaku/bridge-adapter');
 const { SharedDanmakuClient } = require('./agent/danmaku/shared-client');
@@ -17,6 +18,7 @@ const fs = require('node:fs');
 
 const BRIDGE_URL = process.env.GAMEBUDDY_BRIDGE_URL || 'ws://127.0.0.1:27182';
 const BRIDGE_MODE = process.env.GAMEBUDDY_BRIDGE_MODE === 'replay' ? 'replay' : 'game';
+const archetypeMilestones = createArchetypeMilestoneTracker();
 let mainWindow;
 let petWindow;
 let danmakuWindow;
@@ -471,7 +473,12 @@ function handleAcceptedEvent(event) {
     }
     : event;
   broadcast('bridge-event', displayEvent);
+  if (event.name === 'card.reward.selected') {
+    const milestone = archetypeMilestones.confirm(event.data);
+    if (milestone) broadcast('bridge-archetype-milestone', milestone);
+  }
   const impactMessage = draftImpactMessage(event, liveState?.run?.character, displayEvent.data?.cards);
+  if (impactMessage) archetypeMilestones.cache(impactMessage);
   if (impactMessage && bridgeSocket?.readyState === WebSocket.OPEN) {
     bridgeSocket.send(JSON.stringify(impactMessage));
   }

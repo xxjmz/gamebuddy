@@ -53,6 +53,7 @@ let thinkingStartedAtByTask = {};
 let thinkingDurationsByTask = {};
 let thinkingTimer = 0;
 let guideReopenPending = false;
+let milestoneTimer = 0;
 
 const CARD_PRESENTATION = {
   card_reward: { mark: '牌', kicker: '选牌建议' },
@@ -200,6 +201,17 @@ function say(message, fromTour = false) {
   speechText.textContent = message;
   speech.title = message;
   speech.classList.add('visible');
+}
+
+function showArchetypeMilestone(milestone) {
+  if (!milestone?.message) return;
+  window.clearTimeout(milestoneTimer);
+  stage.classList.toggle('archetype-formed', milestone.level === 'formed');
+  stage.classList.add('archetype-milestone');
+  say(milestone.message);
+  milestoneTimer = window.setTimeout(() => {
+    stage.classList.remove('archetype-milestone', 'archetype-formed');
+  }, milestone.level === 'formed' ? 3600 : 3000);
 }
 
 function restAdvicePoints(recommendation) {
@@ -528,6 +540,7 @@ window.gamebuddyBridge?.onRecommendation(setRecommendation);
 window.gamebuddyBridge?.onEncounterGuide(setEncounterGuide);
 window.gamebuddyBridge?.onEncounterGuideState(setEncounterGuideState);
 window.gamebuddyBridge?.onCardRecommendation(setCardRecommendation);
+window.gamebuddyBridge?.onArchetypeMilestone(showArchetypeMilestone);
 window.gamebuddyBridge?.onAgentThinking(setAgentThinking);
 window.gamebuddyBridge?.onLlmMode(mode => {
   llmMode = mode || { enabled: false, thinking: false };

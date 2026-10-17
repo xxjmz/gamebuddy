@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('windowControls', {
 contextBridge.exposeInMainWorld('gamebuddyBridge', {
   onState: callback => ipcRenderer.on('bridge-state', (_event, state) => callback(state)),
   onEvent: callback => ipcRenderer.on('bridge-event', (_event, event) => callback(event)),
+  onArchetypeMilestone: callback => ipcRenderer.on('bridge-archetype-milestone', (_event, milestone) => callback(milestone)),
   onStatus: callback => ipcRenderer.on('bridge-status', (_event, status) => callback(status)),
   onObservation: callback => ipcRenderer.on('bridge-observation', (_event, observation) => callback(observation)),
   onRecommendation: callback => ipcRenderer.on('bridge-recommendation', (_event, recommendation) => callback(recommendation)),

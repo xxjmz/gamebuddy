@@ -258,6 +258,9 @@ h1 { margin: 9px 0 7px; color: var(--cream); font: 500 30px Georgia, "Songti SC"
 .route-choice strong, .route-choice span { display: block; }.route-choice strong { color: var(--mint); font-size: 12px; }.route-choice.recommended strong { color: var(--amber); }.route-choice span { margin-top: 5px; color: #98a5a1; font-size: 10px; }
 .toast { position: fixed; right: 28px; bottom: 24px; padding: 11px 15px; border: 1px solid #466257; background: #1d2925; color: var(--mint); font-size: 11px; opacity: 0; transform: translateY(8px); transition: opacity .2s ease, transform .2s ease; pointer-events: none; }
 .toast.show { opacity: 1; transform: translateY(0); }
+.toast.archetype-milestone { border-color: #b7753d; background: #2d2118; color: #f0c48f; box-shadow: 0 0 0 1px rgba(183, 117, 61, .24), 0 8px 28px rgba(0, 0, 0, .34); animation: archetype-copper-pulse .7s ease-out; }
+.toast.archetype-milestone.formed { border-color: #dea05a; color: #ffe0aa; box-shadow: 0 0 0 1px rgba(222, 160, 90, .34), 0 8px 34px rgba(94, 53, 24, .52); }
+@keyframes archetype-copper-pulse { 0% { transform: translateY(8px) scale(.97); } 55% { transform: translateY(0) scale(1.025); } 100% { transform: translateY(0) scale(1); } }
 .llm-log { margin-top: 28px; border: 1px solid var(--line); background: #14161a; }
 .llm-log-head { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
 .llm-log-head strong { color: var(--cream); font-size: 12px; font-weight: 600; }

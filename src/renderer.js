@@ -23,9 +23,21 @@ let toastTimer;
 
 function showToast(message) {
   toast.textContent = message;
+  toast.classList.remove('archetype-milestone', 'formed');
   toast.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2300);
+}
+
+function showArchetypeMilestone(milestone) {
+  if (!milestone?.message) return;
+  toast.textContent = `${milestone.title} · ${milestone.message}`;
+  toast.classList.toggle('formed', milestone.level === 'formed');
+  toast.classList.add('archetype-milestone', 'show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove('show', 'archetype-milestone', 'formed');
+  }, milestone.level === 'formed' ? 3600 : 3000);
 }
 
 function hpPercent(unit) { return unit?.maxHp > 0 ? Math.max(0, Math.min(100, Math.round((unit.hp / unit.maxHp) * 100))) : 0; }
@@ -567,6 +579,7 @@ window.gamebuddyBridge?.onEvent(event => {
     showToast('已离开商店');
   }
 });
+window.gamebuddyBridge?.onArchetypeMilestone(showArchetypeMilestone);
 window.gamebuddyBridge?.onRecommendation(recommendation => {
   if (!recommendation) {
     state.recommendation = null;
