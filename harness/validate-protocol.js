@@ -14,6 +14,26 @@ const validState = {
 assert.equal(validateState(validState).ok, true);
 assert.equal(validateState({ ...validState, combat: null }).ok, true);
 assert.equal(validateMessage({ type: 'state', data: validState }).ok, true);
+assert.equal(validateState({ ...validState, run: { ...validState.run, runId: 'run-001', startedAt: Date.now(), maxTurnDamage: 37 } }).ok, true);
+assert.equal(validateState({ ...validState, run: { ...validState.run, runId: '' } }).ok, false);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'run.started',
+  timestamp: Date.now(),
+  data: { runId: 'run-001', character: 'ironclad', ascension: 3, startedAt: Date.now() }
+}).ok, true);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'run.ended',
+  timestamp: Date.now(),
+  data: { runId: 'run-001', result: 'win', act: 3, floor: 55, bossName: '守护者', maxTurnDamage: 92 }
+}).ok, true);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'run.ended',
+  timestamp: Date.now(),
+  data: { runId: 'run-001', result: 'maybe' }
+}).ok, false);
 assert.equal(validateMessage({ type: 'event', name: 'turn.started', timestamp: Date.now(), data: { turn: 1 } }).ok, true);
 assert.equal(validateMessage({ type: 'event', name: 'rest.opened', timestamp: Date.now() }).ok, true);
 assert.equal(validateMessage({

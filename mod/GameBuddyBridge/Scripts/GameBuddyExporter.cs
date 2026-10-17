@@ -51,6 +51,15 @@ public static class GameBuddyExporter
     private static bool _eventChoiceOpen;
     private static string _lastShopSignature = string.Empty;
     private static bool _shopOpen;
+    private static object? _activeRunObject;
+    private static string? _activeRunId;
+    private static long _activeRunStartedAt;
+    private static string? _pendingRunResult;
+    private static GameBuddyState? _lastRunSnapshot;
+    private static int _damageTurn = -1;
+    private static int _turnDamage;
+    private static int _maxTurnDamage;
+    private static readonly Dictionary<string, int> LastEnemyHp = new(StringComparer.Ordinal);
 
     public static void Initialize(string modDirectory)
     {
@@ -90,16 +99,23 @@ public static class GameBuddyExporter
             var runState = RunManager.Instance.DebugOnlyGetState();
             if (runState is null)
             {
+                EndActiveRun();
                 return;
             }
 
             var player = LocalContext.GetMe(runState) ?? runState.Players.FirstOrDefault();
             if (player is null)
             {
+                EndActiveRun();
                 return;
             }
 
+            EnsureRunLifecycle(runState, player);
             var snapshot = BuildSnapshot(runState, player);
+            TrackTurnDamage(snapshot);
+            snapshot = snapshot with { Run = snapshot.Run with { MaxTurnDamage = _maxTurnDamage } };
+            _lastRunSnapshot = snapshot;
+            _pendingRunResult = InferRunResult(runState, player) ?? _pendingRunResult;
             var json = JsonSerializer.Serialize(new BridgeMessage<GameBuddyState>("state", snapshot), JsonOptions);
             var signature = JsonSerializer.Serialize(snapshot with { Timestamp = 0 }, JsonOptions);
             if (!string.Equals(signature, _lastSignature, StringComparison.Ordinal))
@@ -125,13 +141,139 @@ public static class GameBuddyExporter
         }
     }
 
+    private static void EnsureRunLifecycle(RunState runState, Player player)
+    {
+        if (ReferenceEquals(_activeRunObject, runState) && !string.IsNullOrEmpty(_activeRunId))
+        {
+            return;
+        }
+
+        if (_activeRunObject is not null)
+        {
+            EndActiveRun();
+        }
+
+        _activeRunObject = runState;
+        _activeRunStartedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        _activeRunId = BuildRunId(runState, player);
+        _pendingRunResult = null;
+        _lastRunSnapshot = null;
+        _damageTurn = -1;
+        _turnDamage = 0;
+        _maxTurnDamage = 0;
+        LastEnemyHp.Clear();
+        PublishEvent("run.started", new
+        {
+            runId = _activeRunId,
+            character = player.Character.Id.Entry,
+            ascension = ReadIntValue(ReadMember(runState, "Ascension", "AscensionLevel")),
+            startedAt = _activeRunStartedAt
+        });
+    }
+
+    private static string BuildRunId(RunState runState, Player player)
+    {
+        var seed = ReadMember(runState, "Seed", "RunSeed", "SeedString")?.ToString();
+        var identity = string.IsNullOrWhiteSpace(seed)
+            ? $"{player.Character.Id.Entry}|{_activeRunStartedAt}|{Guid.NewGuid():N}"
+            : $"{player.Character.Id.Entry}|{seed}";
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..20].ToLowerInvariant();
+    }
+
+    private static string? InferRunResult(RunState runState, Player player)
+    {
+        if (ReadBoolMember(runState, "IsVictory", "Victory", "Won", "HasWon") == true) return "win";
+        var result = ReadTextMember(runState, "Result", "Outcome", "RunResult");
+        if (!string.IsNullOrWhiteSpace(result))
+        {
+            if (result.Contains("win", StringComparison.OrdinalIgnoreCase)
+                || result.Contains("victory", StringComparison.OrdinalIgnoreCase)) return "win";
+            if (result.Contains("loss", StringComparison.OrdinalIgnoreCase)
+                || result.Contains("defeat", StringComparison.OrdinalIgnoreCase)) return "loss";
+        }
+        if (player.Creature.CurrentHp <= 0) return "loss";
+        return null;
+    }
+
+    private static void EndActiveRun()
+    {
+        if (string.IsNullOrEmpty(_activeRunId))
+        {
+            return;
+        }
+
+        var snapshot = _lastRunSnapshot;
+        var result = _pendingRunResult
+            ?? (snapshot?.Player.Hp <= 0 ? "loss" : "abandoned");
+        PublishEvent("run.ended", new
+        {
+            runId = _activeRunId,
+            result,
+            act = snapshot?.Run.Act,
+            floor = snapshot?.Run.TotalFloor ?? snapshot?.Run.Floor,
+            playtimeSeconds = Math.Max(0, (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - _activeRunStartedAt) / 1000),
+            bossId = snapshot?.Run.FinalBossId ?? snapshot?.Run.NextBossId,
+            bossName = snapshot?.Run.FinalBossName ?? snapshot?.Run.NextBoss,
+            maxTurnDamage = _maxTurnDamage
+        });
+        _activeRunObject = null;
+        _activeRunId = null;
+        _lastRunSnapshot = null;
+        _pendingRunResult = null;
+        LastEnemyHp.Clear();
+    }
+
+    private static void TrackTurnDamage(GameBuddyState snapshot)
+    {
+        if (snapshot.Combat is null)
+        {
+            _damageTurn = -1;
+            _turnDamage = 0;
+            LastEnemyHp.Clear();
+            return;
+        }
+
+        if (_damageTurn != snapshot.Combat.Turn)
+        {
+            _damageTurn = snapshot.Combat.Turn;
+            _turnDamage = 0;
+            LastEnemyHp.Clear();
+        }
+
+        var current = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < snapshot.Combat.Enemies.Count; index += 1)
+        {
+            var enemy = snapshot.Combat.Enemies[index];
+            var key = enemy.Id ?? $"{enemy.Name}#{index}";
+            current[key] = Math.Max(0, enemy.Hp);
+            if (LastEnemyHp.TryGetValue(key, out var before) && enemy.Hp < before)
+            {
+                _turnDamage += before - Math.Max(0, enemy.Hp);
+            }
+        }
+        LastEnemyHp.Clear();
+        foreach (var pair in current) LastEnemyHp[pair.Key] = pair.Value;
+        _maxTurnDamage = Math.Max(_maxTurnDamage, _turnDamage);
+    }
+
     private static void PublishTransitions(GameBuddyState snapshot)
     {
         var inCombat = snapshot.Combat is not null;
         var mapVisible = NMapScreen.Instance?.IsVisibleInTree() == true;
 
-        if (inCombat && !_wasInCombat) PublishEvent("combat.started");
-        if (!inCombat && _wasInCombat) PublishEvent("combat.ended");
+        if (inCombat && !_wasInCombat)
+        {
+            var boss = string.Equals(snapshot.Run.CurrentNode, "Boss", StringComparison.OrdinalIgnoreCase);
+            var actualBoss = boss ? snapshot.Combat?.Enemies.FirstOrDefault() : null;
+            PublishEvent("combat.started", new
+            {
+                roomType = snapshot.Run.CurrentNode ?? snapshot.Run.Room,
+                enemies = snapshot.Combat?.Enemies.Select(enemy => new { enemy.Id, enemy.Name }).ToList(),
+                bossId = actualBoss?.Id ?? (boss ? snapshot.Run.NextBossId : null),
+                bossName = actualBoss?.Name ?? (boss ? snapshot.Run.NextBoss : null)
+            });
+        }
+        if (!inCombat && _wasInCombat) PublishEvent("combat.ended", new { roomType = _lastCombatNodeType, victory = snapshot.Player.Hp > 0 });
         if (inCombat && snapshot.Combat?.Turn is int turn && turn != _lastTurn)
         {
             PublishEvent("turn.started", new { turn });
@@ -509,7 +651,13 @@ public static class GameBuddyExporter
                 nextBossId,
                 nextBoss,
                 secondBossId,
-                secondBoss),
+                secondBoss,
+                _activeRunId,
+                _activeRunStartedAt,
+                ReadIntValue(ReadMember(runState, "Ascension", "AscensionLevel")),
+                _maxTurnDamage,
+                string.Equals(currentPoint?.PointType.ToString(), "Boss", StringComparison.OrdinalIgnoreCase) ? nextBossId : null,
+                string.Equals(currentPoint?.PointType.ToString(), "Boss", StringComparison.OrdinalIgnoreCase) ? nextBoss : null),
             new PlayerSnapshot(
                 player.Creature.CurrentHp,
                 player.Creature.MaxHp,
@@ -1005,7 +1153,26 @@ public sealed record BridgeEvent(string Type, string Name, long Timestamp, objec
 public sealed record GameBuddyState(string Schema, long Timestamp, string Source, RunSnapshot Run, PlayerSnapshot Player, CombatSnapshot? Combat, MapSnapshot Map, EventSnapshot? Event, ShopSnapshot? Shop);
 public sealed record EventSnapshot(string Title, string Description, string Kind, List<EventOptionSnapshot> Options, string? EventId, string? PageId);
 public sealed record EventOptionSnapshot(int Index, string Label, string Description, bool Locked, string? OptionId);
-public sealed record RunSnapshot(int Act, int Floor, string? Room, string Character, int TotalFloor, string? CurrentNode, string? CurrentCoord, string ActId, string ActName, string? NextBossId, string? NextBoss, string? SecondBossId, string? SecondBoss);
+public sealed record RunSnapshot(
+    int Act,
+    int Floor,
+    string? Room,
+    string Character,
+    int TotalFloor,
+    string? CurrentNode,
+    string? CurrentCoord,
+    string ActId,
+    string ActName,
+    string? NextBossId,
+    string? NextBoss,
+    string? SecondBossId,
+    string? SecondBoss,
+    string? RunId,
+    long StartedAt,
+    int? Ascension,
+    int MaxTurnDamage,
+    string? FinalBossId,
+    string? FinalBossName);
 public sealed record PlayerSnapshot(int Hp, int MaxHp, int Block, int Gold, int Energy, int MaxEnergy, List<CardSnapshot> Cards, List<OwnedItemSnapshot> Relics, List<OwnedItemSnapshot> Potions, int? MaxPotionSlots);
 public sealed record CombatSnapshot(int Turn, List<CardSnapshot> Hand, List<CardSnapshot> DrawPile, List<CardSnapshot> DiscardPile, List<CardSnapshot> ExhaustPile, List<EnemySnapshot> Enemies);
 public sealed record EnemySnapshot(string? Id, string Name, int Hp, int MaxHp, int Block, string? Intent, List<string> IntentKinds, bool Alive, string? NextMoveId, string? NextMoveName);

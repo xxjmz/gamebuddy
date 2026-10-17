@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, dialog } = require('electron');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const WebSocket = require('ws');
 const { createObservationStore } = require('./harness/observation-store');
 const { createOrchestrator } = require('./agent/orchestrator');
@@ -14,6 +15,7 @@ const { encounterGuideSignature, buildEncounterGuide } = require('./agent/tasks/
 const { DanmakuBridgeAdapter } = require('./agent/danmaku/bridge-adapter');
 const { SharedDanmakuClient } = require('./agent/danmaku/shared-client');
 const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
+const { createReviewService } = require('./review/service');
 const fs = require('node:fs');
 
 const BRIDGE_URL = process.env.GAMEBUDDY_BRIDGE_URL || 'ws://127.0.0.1:27182';
@@ -44,6 +46,9 @@ const observationStore = createObservationStore({ staleAfterMs: 5000 });
 const PET_SKINS_DIR = path.join(__dirname, 'src', 'assets', 'pets');
 const PET_POSES = ['waiting', 'watching', 'thinking', 'advising'];
 const PET_PREFERENCES_PATH = path.join(app.getPath('userData'), 'pet-preferences.json');
+const REVIEW_HISTORY_PATH = process.env.GAMEBUDDY_REVIEW_FILE || path.join(app.getPath('userData'), 'review-history.v1.json');
+const reviewService = createReviewService({ filePath: REVIEW_HISTORY_PATH });
+let reviewClearToken = null;
 const llmConfig = readLlmConfig();
 const baseLlmConfig = { ...llmConfig };
 const sharedDanmakuClient = new SharedDanmakuClient();
@@ -259,6 +264,12 @@ function broadcast(channel, payload) {
   }
 }
 
+function publishReviewChanged() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('review:changed', reviewService.getDashboard());
+  }
+}
+
 function clearDanmaku() {
   danmakuAdapter.invalidate();
   clearTimeout(danmakuHideTimer);
@@ -450,6 +461,8 @@ function setCardExpanded(expanded) {
 
 function handleAcceptedEvent(event) {
   if (!event) return;
+  reviewService.ingestEvent(event);
+  publishReviewChanged();
   void danmakuAdapter.ingestEvent({
     name: event.name,
     eventId: `bridge-event-${event.sequence || event.timestamp || Date.now()}`,
@@ -643,6 +656,8 @@ function connectBridge() {
           const observation = currentObservation();
           void ingestCombatDanmaku(observation).catch(error => console.warn('GameBuddy danmaku observation skipped:', error.message));
           const routableState = withRoutableState(observation.state);
+          reviewService.ingestState(routableState);
+          publishReviewChanged();
           applyCharacterSkin(routableState?.run?.character);
           if (!routableState.combat && routeChoiceCount(routableState) <= 1) clearAgentThinking('map_route');
           recordDecision({ runId: agentRunId, observation: { ...observation, state: routableState }, decision: observation.decision });
@@ -905,6 +920,28 @@ ipcMain.on('accept-decision', (_event, decision) => {
 });
 ipcMain.on('clear-llm-log', () => clearLlmLog());
 ipcMain.handle('get-observation', () => currentObservation());
+ipcMain.handle('review:getDashboard', () => reviewService.getDashboard());
+ipcMain.handle('review:export', async () => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: '导出 GameBuddy 本地复盘',
+    defaultPath: `gamebuddy-review-${new Date().toISOString().slice(0, 10)}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  });
+  if (result.canceled || !result.filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(result.filePath, `${JSON.stringify(reviewService.exportData(), null, 2)}\n`, 'utf8');
+  return { ok: true };
+});
+ipcMain.handle('review:requestClear', () => {
+  reviewClearToken = randomUUID();
+  return reviewClearToken;
+});
+ipcMain.handle('review:clear', (_event, token) => {
+  if (!reviewClearToken || token !== reviewClearToken) return { ok: false, reason: 'invalid_confirmation' };
+  reviewClearToken = null;
+  const dashboard = reviewService.clear();
+  publishReviewChanged();
+  return { ok: true, dashboard };
+});
 ipcMain.handle('get-shared-danmaku-context', () => danmakuAdapter.getSharedScene());
 ipcMain.handle('submit-shared-danmaku', async (_event, payload = {}) => (
   danmakuAdapter.submitShared(payload.text, { echoDelayMs: 3000 })
@@ -944,7 +981,7 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => { isQuitting = true; clearTimeout(bridgeReconnectTimer); clearTimeout(danmakuHideTimer); clearInterval(bridgeHealthTimer); clearInterval(petTopmostTimer); clearInterval(danmakuTimer); bridgeSocket?.close(); });
+app.on('before-quit', () => { isQuitting = true; reviewService.flush(); clearTimeout(bridgeReconnectTimer); clearTimeout(danmakuHideTimer); clearInterval(bridgeHealthTimer); clearInterval(petTopmostTimer); clearInterval(danmakuTimer); bridgeSocket?.close(); });
 app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit();
 });

@@ -1,5 +1,6 @@
 const SUPPORTED_SCHEMA = 'gamebuddy.state.v1';
-const SUPPORTED_EVENTS = new Set(['combat.started', 'turn.started', 'combat.ended', 'map.opened', 'rest.opened', 'rest.closed', 'event.opened', 'event.closed', 'shop.opened', 'shop.updated', 'shop.closed', 'card.played', 'card.reward.opened', 'card.reward.closed', 'card.reward.selected']);
+const SUPPORTED_EVENTS = new Set(['run.started', 'run.ended', 'combat.started', 'turn.started', 'combat.ended', 'map.opened', 'rest.opened', 'rest.closed', 'event.opened', 'event.closed', 'shop.opened', 'shop.updated', 'shop.closed', 'card.played', 'card.reward.opened', 'card.reward.closed', 'card.reward.selected']);
+const RUN_RESULTS = new Set(['win', 'loss', 'abandoned']);
 const CARD_SOURCES = new Set(['runtime', 'catalog', 'unavailable']);
 const SHOP_ITEM_TYPES = new Set(['card', 'relic', 'potion', 'service']);
 const DRAFT_ARCHETYPE_IDS = ['auto_strike', 'exhaust', 'strength', 'block'];
@@ -100,6 +101,14 @@ function validateState(state) {
   if (!state.run || typeof state.run !== 'object') return { ok: false, reason: 'run must be an object' };
   for (const field of ['act', 'floor', 'room', 'character']) {
     if (!(field in state.run)) return { ok: false, reason: `run missing ${field}` };
+  }
+  if (state.run.runId !== undefined && (typeof state.run.runId !== 'string' || !state.run.runId)) {
+    return { ok: false, reason: 'run.runId must be a non-empty string' };
+  }
+  for (const field of ['startedAt', 'maxTurnDamage']) {
+    if (state.run[field] !== undefined && state.run[field] !== null && !Number.isFinite(state.run[field])) {
+      return { ok: false, reason: `run.${field} must be a number or null` };
+    }
   }
   if (!state.player || typeof state.player !== 'object') return { ok: false, reason: 'player must be an object' };
   for (const field of ['hp', 'maxHp', 'block', 'gold', 'energy', 'maxEnergy', 'cards', 'relics', 'potions']) {
@@ -225,6 +234,18 @@ function validateMessage(message) {
   if (message.type !== 'event') return { ok: false, reason: `unsupported message type ${message.type || 'missing'}` };
   if (typeof message.name !== 'string' || !SUPPORTED_EVENTS.has(message.name)) return { ok: false, reason: `unsupported event ${message.name || 'missing'}` };
   if (!Number.isFinite(message.timestamp)) return { ok: false, reason: 'event timestamp must be a number' };
+  if (message.name === 'run.started') {
+    const data = message.data;
+    if (!data || typeof data !== 'object') return { ok: false, reason: 'run.started data must be an object' };
+    if (typeof data.runId !== 'string' || !data.runId) return { ok: false, reason: 'run.started runId must be a non-empty string' };
+    if (typeof data.character !== 'string' || !data.character) return { ok: false, reason: 'run.started character must be a non-empty string' };
+  }
+  if (message.name === 'run.ended') {
+    const data = message.data;
+    if (!data || typeof data !== 'object') return { ok: false, reason: 'run.ended data must be an object' };
+    if (typeof data.runId !== 'string' || !data.runId) return { ok: false, reason: 'run.ended runId must be a non-empty string' };
+    if (!RUN_RESULTS.has(data.result)) return { ok: false, reason: 'run.ended result must be win, loss or abandoned' };
+  }
   if (message.name === 'card.reward.opened' && message.data !== undefined && message.data !== null) {
     const validation = validateReward(message.data, 'card.reward.opened data');
     if (!validation.ok) return validation;

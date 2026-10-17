@@ -13,7 +13,8 @@ const state = {
   reward: null,
   event: null,
   shop: null,
-  recommendation: null
+  recommendation: null,
+  reviewDashboard: null
 };
 
 const viewContainer = document.querySelector('#view-container');
@@ -367,6 +368,13 @@ function routeView() {
 
 function render() {
   document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.mode === state.mode));
+  const reviewing = state.mode === 'review';
+  document.body.classList.toggle('review-mode', reviewing);
+  if (reviewing) {
+    viewContainer.innerHTML = window.GameBuddyReviewUi?.render(state.reviewDashboard) || '';
+    bindViewActions();
+    return;
+  }
   const copy = {
     combat: ['COMBAT / LIVE STATE', '战斗数据在同步', '出牌顺序先不做。这里只显示真实手牌和敌人，路线建议在地图页。'],
     draft: ['REWARD / CARD REWARD', '这张牌值得拿吗？', '把卡组当前缺口、未来路线和战斗表现放在一起判断。'],
@@ -411,9 +419,30 @@ function bindViewActions() {
   document.querySelector('#confirm-action')?.addEventListener('click', () => showToast('建议已记录，GameBuddy 不会自动操作游戏'));
   document.querySelector('#more-actions')?.addEventListener('click', () => showToast('其他方案将在决策引擎接入后显示'));
   document.querySelectorAll('[data-node]').forEach(button => button.addEventListener('click', () => showToast(`节点 ${button.dataset.node}`)));
+  document.querySelector('#review-exit')?.addEventListener('click', () => { state.mode = 'combat'; render(); });
+  document.querySelector('#review-export')?.addEventListener('click', async () => {
+    const result = await window.gamebuddyBridge?.exportReview?.();
+    showToast(result?.ok ? '复盘记录已导出' : '已取消导出');
+  });
+  document.querySelector('#review-clear')?.addEventListener('click', async () => {
+    if (!window.confirm('确认清空本机全部复盘记录？此操作不能撤销。')) return;
+    const token = await window.gamebuddyBridge?.requestReviewClear?.();
+    const result = await window.gamebuddyBridge?.clearReview?.(token);
+    if (result?.ok) {
+      state.reviewDashboard = result.dashboard;
+      render();
+      showToast('本机复盘记录已清空');
+    }
+  });
 }
 
-document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', () => { state.mode = button.dataset.mode; render(); }));
+document.querySelectorAll('.nav-item').forEach(button => button.addEventListener('click', async () => {
+  state.mode = button.dataset.mode;
+  if (state.mode === 'review') {
+    state.reviewDashboard = await window.gamebuddyBridge?.getReviewDashboard?.();
+  }
+  render();
+}));
 document.querySelector('#minimize-button').addEventListener('click', () => window.windowControls?.minimize());
 document.querySelector('#close-button').addEventListener('click', () => window.windowControls?.close());
 document.querySelector('#refresh-button').addEventListener('click', async () => {
@@ -517,7 +546,12 @@ setInterval(() => {
 render();
 setBridgeStatus({ status: 'waiting' });
 window.gamebuddyBridge?.onState(applyBridgeState);
+window.gamebuddyBridge?.onReviewChanged(dashboard => {
+  state.reviewDashboard = dashboard;
+  if (state.mode === 'review') render();
+});
 window.gamebuddyBridge?.onEvent(event => {
+  if (state.mode === 'review') return;
   if (event.name === 'card.reward.opened') {
     state.reward = event.data || null;
     state.recommendation = null;
@@ -588,6 +622,7 @@ window.gamebuddyBridge?.onRecommendation(recommendation => {
   }
   if (recommendation.task !== 'map_route' && recommendation.task !== 'rest_site' && recommendation.task !== 'card_reward' && recommendation.task !== 'event_choice' && recommendation.task !== 'shop_choice') return;
   state.recommendation = recommendation;
+  if (state.mode === 'review') return;
   if (recommendation.task === 'rest_site' || recommendation.task === 'event_choice') state.mode = 'route';
   if (recommendation.task === 'card_reward') state.mode = 'draft';
   if (recommendation.task === 'shop_choice') state.mode = 'shop';
