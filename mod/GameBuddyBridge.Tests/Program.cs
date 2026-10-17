@@ -12,9 +12,13 @@ static Dictionary<string, object?> Archetype(string id, object delta, int? befor
     {
         ["id"] = id,
         ["deltaPoints"] = delta,
-        ["reason"] = $"{id}-reason"
+        ["reason"] = $"{id}-reason",
+        ["beforeScore"] = beforeScore ?? 10,
+        ["afterScore"] = Math.Clamp((beforeScore ?? 10) + (delta is int value ? value : 0), 0, 100),
+        ["beforeStage"] = "unformed",
+        ["afterStage"] = "unformed",
+        ["completedAxes"] = Array.Empty<string>()
     };
-    if (beforeScore is int score) archetype["beforeScore"] = score;
     return archetype;
 }
 
@@ -83,23 +87,26 @@ Assert(!GameBuddyRewardImpactCodec.TryParse(
     """{"type":"draft_impact","signature":"old","impacts":[{"cardId":"ANGER","deltaPoints":1}]}""", out _),
     "Legacy one-line message was accepted.");
 
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("auto_strike", 4, null), true) == "自动打击 +4%",
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("auto_strike", 4, null), true) == "自动打击 +4",
     "Chinese positive formatting is incorrect.");
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("exhaust", -2, null), false) == "Exhaust -2%",
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("exhaust", -2, null), false) == "Exhaust -2",
     "English negative formatting is incorrect.");
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("block", 0, null), true) == "格挡壁垒 0%",
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("block", 0, null), true) == "格挡壁垒 0",
     "Zero formatting is incorrect.");
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("auto_strike", 14, null, 42), true) == "自动打击 42+14",
-    "Current score plus delta formatting is incorrect.");
-Assert(GameBuddyRewardImpactCodec.FormatLine(new("strength", -2, null, 18), true) == "力量叠加 18-2",
-    "Negative current score formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatLine(
+    new("auto_strike", 14, null, 42, false, 56, "unformed", "started", ["auto_gate"]), true)
+    == "自动打击 42 → 56 (+14) · 启动", "Started transition formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatLine(
+    new("strength", -2, null, 18, true, 16, "started", "started", []), true)
+    == "力量叠加 18 → 16 (-2)", "Negative current score formatting is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatProgress(42, 0) == "42", "Zero delta should keep the current score only.");
 Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(14) == "+14", "Positive delta sign is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(-2) == "-2", "Negative delta sign is incorrect.");
 var withScore = ValidArchetypes();
 withScore[0] = Archetype("auto_strike", 8, 9);
 Assert(GameBuddyRewardImpactCodec.TryParse(Message(Card("ANGER", 8, withScore)), out var scored)
-    && scored!.Impacts["ANGER"].Archetypes[0].BeforeScore == 9,
-    "beforeScore was not retained.");
+    && scored!.Impacts["ANGER"].Archetypes[0].BeforeScore == 9
+    && scored.Impacts["ANGER"].Archetypes[0].AfterScore == 17,
+    "before/after score was not retained.");
 
 Console.WriteLine("GameBuddy reward impact codec tests passed.");

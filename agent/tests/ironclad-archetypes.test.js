@@ -259,6 +259,20 @@ test('候选输出四条 impacts 与四条 scores，非铁甲不装饰', () => {
   assert.equal(isIronclad('silent'), false);
 });
 
+test('候选输出前后阶段并只报告新补齐的直接结构轴', () => {
+  const base = [{ id: 'POMMEL_STRIKE' }, { id: 'PILLAGE' }, ...neutral(8)];
+  const gate = impact(base, { id: 'HELLRAISER' }, 'auto_strike');
+  assert.equal(gate.beforeStage, 'unformed');
+  assert.equal(gate.afterStage, 'started');
+  assert.deepEqual(gate.completedAxes, ['auto_gate']);
+  assert.equal(gate.beforeScore < gate.afterScore, true);
+
+  const support = impact(focusedDecks.strength, { id: 'BATTLE_TRANCE' }, 'strength');
+  assert.equal(support.beforeStage, 'formed');
+  assert.equal(support.afterStage, 'formed');
+  assert.deepEqual(support.completedAxes, []);
+});
+
 test('叠卡轴放慢而单卡槽仍由第一张完成', () => {
   const starter = [
     ...Array.from({ length: 5 }, () => ({ id: 'STRIKE_IRONCLAD' })),

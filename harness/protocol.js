@@ -3,6 +3,7 @@ const SUPPORTED_EVENTS = new Set(['combat.started', 'turn.started', 'combat.ende
 const CARD_SOURCES = new Set(['runtime', 'catalog', 'unavailable']);
 const SHOP_ITEM_TYPES = new Set(['card', 'relic', 'potion', 'service']);
 const DRAFT_ARCHETYPE_IDS = ['auto_strike', 'exhaust', 'strength', 'block'];
+const DRAFT_ARCHETYPE_STAGES = new Set(['unformed', 'started', 'formed']);
 
 function validateCardSnapshot(card, prefix) {
   if (typeof card === 'string' && card) return { ok: true };
@@ -274,9 +275,20 @@ function validateDraftImpactMessage(message) {
       if (archetype.reason !== undefined && typeof archetype.reason !== 'string') {
         return { ok: false, reason: 'archetype reason must be a string' };
       }
-      if (archetype.beforeScore !== undefined
-        && (!Number.isInteger(archetype.beforeScore) || archetype.beforeScore < 0 || archetype.beforeScore > 100)) {
-        return { ok: false, reason: 'archetype beforeScore must be an integer from 0 to 100' };
+      for (const field of ['beforeScore', 'afterScore']) {
+        if (!Number.isInteger(archetype[field]) || archetype[field] < 0 || archetype[field] > 100) {
+          return { ok: false, reason: `archetype ${field} must be an integer from 0 to 100` };
+        }
+      }
+      for (const field of ['beforeStage', 'afterStage']) {
+        if (!DRAFT_ARCHETYPE_STAGES.has(archetype[field])) {
+          return { ok: false, reason: `archetype ${field} must be a known stage` };
+        }
+      }
+      if (!Array.isArray(archetype.completedAxes) || archetype.completedAxes.length > 8
+        || archetype.completedAxes.some(axis => typeof axis !== 'string' || !axis || axis.length > 64)
+        || new Set(archetype.completedAxes).size !== archetype.completedAxes.length) {
+        return { ok: false, reason: 'archetype completedAxes must contain unique axis IDs' };
       }
       if (archetype.started !== undefined && typeof archetype.started !== 'boolean') {
         return { ok: false, reason: 'archetype started must be a boolean' };

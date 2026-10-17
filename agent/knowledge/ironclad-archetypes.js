@@ -572,6 +572,8 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
   if (!id || !IRONCLAD_ARCHETYPE_MATRIX[id]) return null;
   const before = scoreIroncladArchetypes(deck, relics);
   const after = scoreIroncladArchetypes([...(deck || []), candidate], relics);
+  const beforeContext = buildDeckContext(deck);
+  const afterContext = buildDeckContext([...(deck || []), candidate]);
   return ARCHETYPES.map((archetype, index) => {
     const cell = IRONCLAD_ARCHETYPE_MATRIX[id][archetype.key];
     const rawBefore = scoreOne(archetype.key, deck, relics);
@@ -579,7 +581,6 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
     const rawDelta = rawAfter - rawBefore;
     let deltaPoints = Math.round(rawDelta);
     const config = CONFIG[archetype.key];
-    const beforeContext = buildDeckContext(deck);
     const firstDirectComponent = config.direct.includes(cell.group)
       && !hasGroup(beforeContext, archetype.key, cell.group);
     if (rawDelta > 0 && deltaPoints === 0 && firstDirectComponent) deltaPoints = 1;
@@ -590,6 +591,12 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
       name: archetype.name,
       beforeScore: before[index].score,
       afterScore: after[index].score,
+      beforeStage: before[index].stage,
+      afterStage: after[index].stage,
+      completedAxes: config.direct.filter(group => (
+        !hasGroup(beforeContext, archetype.key, group)
+        && hasGroup(afterContext, archetype.key, group)
+      )),
       started: before[index].started,
       deltaPoints,
       role: cell.role,

@@ -111,7 +111,11 @@ test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
       && impact.archetypes.every(item => Number.isInteger(item.deltaPoints)
         && item.deltaPoints >= -100 && item.deltaPoints <= 100
         && Number.isInteger(item.beforeScore)
-        && item.beforeScore >= 0 && item.beforeScore <= 100)
+        && item.beforeScore >= 0 && item.beforeScore <= 100
+        && Number.isInteger(item.afterScore)
+        && ['unformed', 'started', 'formed'].includes(item.beforeStage)
+        && ['unformed', 'started', 'formed'].includes(item.afterStage)
+        && Array.isArray(item.completedAxes))
   )));
   assert.deepEqual(message.impacts[0].archetypes.map(impact => impact.id), DRAFT_ARCHETYPE_IDS);
   assert.equal(draftImpactMessage(event, 'silent', decorated), null);
@@ -123,7 +127,12 @@ test('四流派消息原子拒绝缺项、重复和越界候选且保持奖励�
   const validImpacts = DRAFT_ARCHETYPE_IDS.map((id, index) => ({
     id,
     deltaPoints: index === 0 ? -100 : index === 3 ? 100 : index,
-    reason: `reason-${id}`
+    reason: `reason-${id}`,
+    beforeScore: 10 + index,
+    afterScore: 12 + index,
+    beforeStage: 'unformed',
+    afterStage: index === 0 ? 'started' : 'unformed',
+    completedAxes: index === 0 ? ['auto_gate'] : []
   }));
   const cards = [
     { id: 'A', archetypeImpacts: validImpacts },

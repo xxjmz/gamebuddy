@@ -2,7 +2,16 @@ using System.Text.Json;
 
 namespace GameBuddyBridge.Scripts;
 
-internal sealed record DraftArchetypeImpact(string Id, int DeltaPoints, string? Reason, int? BeforeScore = null, bool Started = false);
+internal sealed record DraftArchetypeImpact(
+    string Id,
+    int DeltaPoints,
+    string? Reason,
+    int? BeforeScore = null,
+    bool Started = false,
+    int? AfterScore = null,
+    string? BeforeStage = null,
+    string? AfterStage = null,
+    IReadOnlyList<string>? CompletedAxes = null);
 internal sealed record DraftCardImpact(
     string CardId,
     int DeltaPoints,
@@ -15,6 +24,7 @@ internal static class GameBuddyRewardImpactCodec
     internal static readonly string[] ArchetypeIds = ["auto_strike", "exhaust", "strength", "block"];
     private static readonly string[] ChineseNames = ["自动打击", "消耗引擎", "力量叠加", "格挡壁垒"];
     private static readonly string[] EnglishNames = ["Auto Strike", "Exhaust", "Strength", "Block"];
+    private static readonly HashSet<string> Stages = ["unformed", "started", "formed"];
 
     internal static bool TryParse(string json, out DraftImpactMessage? message)
     {
@@ -59,9 +69,14 @@ internal static class GameBuddyRewardImpactCodec
         if (index < 0) throw new ArgumentOutOfRangeException(nameof(impact), "Unknown archetype ID.");
         var name = (useChinese ? ChineseNames : EnglishNames)[index];
         var sign = impact.DeltaPoints > 0 ? "+" : string.Empty;
-        if (impact.BeforeScore is int before)
-            return $"{name} {FormatProgress(before, impact.DeltaPoints)}";
-        return $"{name} {sign}{impact.DeltaPoints}%";
+        if (impact.BeforeScore is int before && impact.AfterScore is int after)
+        {
+            var transition = StageTransition(impact.BeforeStage, impact.AfterStage, useChinese);
+            return $"{name} {before} → {after} ({sign}{impact.DeltaPoints}){transition}";
+        }
+        if (impact.BeforeScore is int current)
+            return $"{name} {FormatProgress(current, impact.DeltaPoints)}";
+        return $"{name} {sign}{impact.DeltaPoints}";
     }
 
     private static bool TryParseCard(JsonElement item, out DraftCardImpact? impact)
@@ -96,11 +111,29 @@ internal static class GameBuddyRewardImpactCodec
                 if (reasonElement.ValueKind != JsonValueKind.String) return false;
                 reason = reasonElement.GetString();
             }
-            int? beforeScore = null;
-            if (archetypeElement.TryGetProperty("beforeScore", out var beforeElement))
+            if (!archetypeElement.TryGetProperty("beforeScore", out var beforeElement)
+                || !beforeElement.TryGetInt32(out var beforeScore)
+                || beforeScore is < 0 or > 100
+                || !archetypeElement.TryGetProperty("afterScore", out var afterElement)
+                || !afterElement.TryGetInt32(out var afterScore)
+                || afterScore is < 0 or > 100
+                || !archetypeElement.TryGetProperty("beforeStage", out var beforeStageElement)
+                || beforeStageElement.ValueKind != JsonValueKind.String
+                || !archetypeElement.TryGetProperty("afterStage", out var afterStageElement)
+                || afterStageElement.ValueKind != JsonValueKind.String
+                || !archetypeElement.TryGetProperty("completedAxes", out var completedAxesElement)
+                || completedAxesElement.ValueKind != JsonValueKind.Array
+                || completedAxesElement.GetArrayLength() > 8) return false;
+            var beforeStage = beforeStageElement.GetString();
+            var afterStage = afterStageElement.GetString();
+            if (beforeStage is null || afterStage is null
+                || !Stages.Contains(beforeStage) || !Stages.Contains(afterStage)) return false;
+            var completedAxes = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var axisElement in completedAxesElement.EnumerateArray())
             {
-                if (!beforeElement.TryGetInt32(out var before) || before is < 0 or > 100) return false;
-                beforeScore = before;
+                if (axisElement.ValueKind != JsonValueKind.String) return false;
+                var axis = axisElement.GetString();
+                if (string.IsNullOrWhiteSpace(axis) || axis.Length > 64 || !completedAxes.Add(axis)) return false;
             }
             var started = false;
             if (archetypeElement.TryGetProperty("started", out var startedElement))
@@ -108,7 +141,16 @@ internal static class GameBuddyRewardImpactCodec
                 if (startedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
                 started = startedElement.GetBoolean();
             }
-            if (!byId.TryAdd(id, new DraftArchetypeImpact(id, archetypeDelta, reason, beforeScore, started))) return false;
+            if (!byId.TryAdd(id, new DraftArchetypeImpact(
+                id,
+                archetypeDelta,
+                reason,
+                beforeScore,
+                started,
+                afterScore,
+                beforeStage,
+                afterStage,
+                completedAxes.ToArray()))) return false;
         }
 
         var ordered = ArchetypeIds.Select(id => byId[id]).ToArray();
@@ -129,6 +171,14 @@ internal static class GameBuddyRewardImpactCodec
 
     internal static string FormatSignedDelta(int delta) =>
         delta > 0 ? $"+{delta}" : delta.ToString();
+
+    private static string StageTransition(string? before, string? after, bool useChinese)
+    {
+        if (before == after) return string.Empty;
+        if (after == "formed") return useChinese ? " · 成型" : " · Formed";
+        if (after == "started") return useChinese ? " · 启动" : " · Started";
+        return string.Empty;
+    }
 
     private static bool IsAllowedDelta(int delta) => delta is >= -100 and <= 100;
 }

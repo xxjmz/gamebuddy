@@ -39,6 +39,7 @@ function decorateAutoStrikeCards(character, deck, relics, candidates) {
 }
 
 const DRAFT_ARCHETYPE_IDS = Object.freeze(['auto_strike', 'exhaust', 'strength', 'block']);
+const DRAFT_ARCHETYPE_STAGES = new Set(['unformed', 'started', 'formed']);
 
 function draftArchetypes(card) {
   if (!Array.isArray(card?.archetypeImpacts) || card.archetypeImpacts.length !== DRAFT_ARCHETYPE_IDS.length) {
@@ -50,14 +51,22 @@ function draftArchetypes(card) {
     const impact = byId.get(id);
     if (!impact || !Number.isInteger(impact.deltaPoints)
       || impact.deltaPoints < -100 || impact.deltaPoints > 100) return null;
+    if (!Number.isInteger(impact.beforeScore) || impact.beforeScore < 0 || impact.beforeScore > 100
+      || !Number.isInteger(impact.afterScore) || impact.afterScore < 0 || impact.afterScore > 100
+      || !DRAFT_ARCHETYPE_STAGES.has(impact.beforeStage)
+      || !DRAFT_ARCHETYPE_STAGES.has(impact.afterStage)
+      || !Array.isArray(impact.completedAxes)
+      || impact.completedAxes.some(axis => typeof axis !== 'string' || !axis)) return null;
     const entry = {
       id,
       deltaPoints: impact.deltaPoints,
-      reason: typeof impact.reason === 'string' && impact.reason ? impact.reason : undefined
+      reason: typeof impact.reason === 'string' && impact.reason ? impact.reason : undefined,
+      beforeScore: impact.beforeScore,
+      afterScore: impact.afterScore,
+      beforeStage: impact.beforeStage,
+      afterStage: impact.afterStage,
+      completedAxes: [...impact.completedAxes]
     };
-    if (Number.isInteger(impact.beforeScore) && impact.beforeScore >= 0 && impact.beforeScore <= 100) {
-      entry.beforeScore = impact.beforeScore;
-    }
     if (typeof impact.started === 'boolean') entry.started = impact.started;
     return entry;
   });

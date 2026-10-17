@@ -6,14 +6,14 @@
 
 ## 2. 候选成型引导与协议
 
-- [ ] 2.1 为候选影响增加真实 `beforeScore/afterScore`、`beforeStage/afterStage` 和 `completedAxes`，并验证补齐最后必要轴会产生“启动”或“成型”跃迁，普通外围增益不会误报跃迁。
-- [ ] 2.2 扩展 `draft_impact` 生成、Harness 校验和 Mod codec 的原子校验，同时保留顶层自动打击别名与旧布尔字段；运行 `node --test agent/tests/auto-strike.test.js`、`node harness/validate-protocol.js` 和 `dotnet run --project mod/GameBuddyBridge.Tests`。
+- [x] 2.1 为候选影响增加真实 `beforeScore/afterScore`、`beforeStage/afterStage` 和 `completedAxes`，并验证补齐最后必要轴会产生“启动”或“成型”跃迁，普通外围增益不会误报跃迁。
+- [x] 2.2 扩展 `draft_impact` 生成、Harness 校验和 Mod codec 的原子校验，同时保留顶层自动打击别名与旧布尔字段；运行 `node --test agent/tests/auto-strike.test.js`、`node harness/validate-protocol.js` 和 `dotnet run --project mod/GameBuddyBridge.Tests`。
 - [ ] 2.3 在 Mod 中保存奖励打开时的牌组与候选多重集合，奖励关闭后通过首个稳定快照唯一确认实际拿牌并发布一次 `card.reward.selected`；测试覆盖正常拿牌、升级候选、重复牌、跳过、多候选变化和未知结果。
 
 ## 3. 构筑点和阶段 UI
 
-- [ ] 3.1 更新桌面端流派总览与候选影响，移除百分号并显示三阶段、真实前后构筑点及阶段跃迁；运行 `node --test agent/tests/archetype-ui.test.js`。
-- [ ] 3.2 更新游戏内铜铁面板，固定显示四套构筑点与阶段，悬停候选时优先显示“启动/成型”和补齐轴，否则显示前后点数；通过 Mod codec/格式化测试验证文本不含 `%`。
+- [x] 3.1 更新桌面端流派总览与候选影响，移除百分号并显示三阶段、真实前后构筑点及阶段跃迁；运行 `node --test agent/tests/archetype-ui.test.js`。
+- [x] 3.2 更新游戏内铜铁面板，固定显示四套构筑点与阶段，悬停候选时优先显示“启动/成型”和补齐轴，否则显示前后点数；通过 Mod codec/格式化测试验证文本不含 `%`。
 - [ ] 3.3 缓存同奖励签名的候选跃迁，收到已确认的 `card.reward.selected` 后只对向上阶段跃迁播放一次铜色反馈并生成一条桌宠确定性短句；测试验证普通加分、预览、跳过、未知选择不反馈，多流派跃迁合并且成型优先。
 
 ## 4. 游戏内候选定位

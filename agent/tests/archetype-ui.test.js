@@ -9,21 +9,25 @@ const {
 } = require('../../src/archetype-ui');
 
 const scores = [
-  { id: 'auto_strike', name: '自动打击流', score: 18 },
-  { id: 'exhaust', name: '消耗引擎', score: 42 },
-  { id: 'strength', name: '力量叠加', score: 12 },
-  { id: 'block', name: '格挡壁垒', score: 7 }
+  { id: 'auto_strike', name: '自动打击流', score: 18, stage: 'started' },
+  { id: 'exhaust', name: '消耗引擎', score: 42, stage: 'started' },
+  { id: 'strength', name: '力量叠加', score: 12, stage: 'unformed' },
+  { id: 'block', name: '格挡壁垒', score: 7, stage: 'unformed' }
 ];
 
 test('主流派状态覆盖阈值、唯一最高、并列和未成型', () => {
   assert.deepEqual(buildStatus(scores), {
     kind: 'primary',
-    label: '主流派 · 消耗引擎',
+    label: '主流派 · 消耗引擎 · 已启动',
     archetypeIds: ['exhaust']
   });
   assert.equal(buildStatus(scores.map(item => ({ ...item, score: item.id === 'auto_strike' ? 42 : item.score }))).kind, 'mixed');
-  assert.equal(buildStatus(scores.map(item => ({ ...item, score: 14 }))).kind, 'unformed');
-  assert.equal(buildStatus(scores.map(item => ({ ...item, score: item.id === 'exhaust' ? 15 : 3 }))).kind, 'primary');
+  assert.equal(buildStatus(scores.map(item => ({ ...item, score: 14, stage: 'unformed' }))).kind, 'unformed');
+  assert.equal(buildStatus(scores.map(item => ({
+    ...item,
+    score: item.id === 'exhaust' ? 15 : 3,
+    stage: item.id === 'exhaust' ? 'started' : 'unformed'
+  }))).kind, 'primary');
 });
 
 test('候选增量显式优先、绝对值降序、固定流派顺序且最多两条', () => {
@@ -47,25 +51,35 @@ test('全是纯稀释时只显示当前最高流派的一条', () => {
   assert.deepEqual(selected.map(item => item.id), ['exhaust']);
 });
 
-test('铜铁面板显示四套当前分，候选同时给出当前百分比和变化', () => {
+test('铜铁面板显示四套构筑点和阶段，候选给出真实前后点数与跃迁', () => {
   const overview = renderOverview(scores);
   assert.match(overview, /archetype-iron-plate/);
-  assert.match(overview, /流派度≠胜率/);
-  assert.match(overview, /主流派 · 消耗引擎/);
+  assert.match(overview, /构筑点不是胜率/);
+  assert.match(overview, /主流派 · 消耗引擎 · 已启动/);
   for (const item of scores) {
     assert.match(overview, new RegExp(item.name));
-    assert.match(overview, new RegExp(`>${item.score}<`));
+    assert.match(overview, new RegExp(`>${item.score} 点<`));
   }
   const positive = renderCardImpacts([
-    { id: 'exhaust', name: '消耗引擎', beforeScore: 42, deltaPoints: 3, explicit: true, reason: '出口' }
+    {
+      id: 'exhaust', name: '消耗引擎', beforeScore: 42, afterScore: 45, deltaPoints: 3,
+      beforeStage: 'unformed', afterStage: 'started', completedAxes: ['exhaust_outlet'],
+      explicit: true, reason: '出口'
+    }
   ], scores);
   const negative = renderCardImpacts([
-    { id: 'strength', name: '力量叠加', beforeScore: 18, deltaPoints: -2, explicit: true, reason: '稀释' }
+    {
+      id: 'strength', name: '力量叠加', beforeScore: 18, afterScore: 16, deltaPoints: -2,
+      beforeStage: 'started', afterStage: 'started', completedAxes: [],
+      explicit: true, reason: '稀释'
+    }
   ], scores);
-  assert.match(positive, /消耗引擎 42% \+3/);
+  assert.match(positive, /消耗引擎 42 → 45（\+3） · 已启动/);
+  assert.match(positive, /补齐：消耗出口/);
+  assert.match(positive, /milestone/);
   assert.match(positive, /archetype-impact positive/);
-  assert.doesNotMatch(positive, /45%/);
-  assert.match(negative, /力量叠加 18% -2/);
+  assert.doesNotMatch(positive, /%/);
+  assert.match(negative, /力量叠加 18 → 16（-2）/);
   assert.match(negative, /archetype-impact negative/);
 });
 
@@ -74,10 +88,13 @@ test('流派 HTML 输出转义名称和原因', () => {
   assert.equal(escapeHtml(hostile), '&lt;img src=x onerror=&quot;boom&quot;&gt;&amp;&#39;');
   const overview = renderOverview([{ id: 'exhaust', name: hostile, score: 20 }]);
   const impacts = renderCardImpacts([
-    { id: 'exhaust', name: hostile, deltaPoints: 2, explicit: true, reason: hostile }
+    {
+      id: 'exhaust', name: hostile, beforeScore: 20, afterScore: 22, deltaPoints: 2,
+      beforeStage: 'started', afterStage: 'started', completedAxes: [], explicit: true, reason: hostile
+    }
   ], [{ id: 'exhaust', score: 20 }]);
   assert.doesNotMatch(overview, /<img/);
   assert.doesNotMatch(impacts, /<img/);
   assert.match(impacts, /&lt;img/);
-  assert.match(impacts, /流派度≠胜率/);
+  assert.match(impacts, /构筑点不是胜率/);
 });

@@ -169,7 +169,12 @@ const draftImpact = {
     archetypes: DRAFT_ARCHETYPE_IDS.map((id, archetypeIndex) => ({
       id,
       deltaPoints: cardIndex + archetypeIndex - 2,
-      reason: `${id}-reason`
+      reason: `${id}-reason`,
+      beforeScore: 10 + archetypeIndex,
+      afterScore: 11 + cardIndex + archetypeIndex,
+      beforeStage: 'unformed',
+      afterStage: cardIndex === 2 && archetypeIndex === 0 ? 'started' : 'unformed',
+      completedAxes: cardIndex === 2 && archetypeIndex === 0 ? ['auto_gate'] : []
     }))
   }))
 };
@@ -189,5 +194,8 @@ assert.equal(invalidDraft(message => {
 assert.equal(invalidDraft(message => { message.impacts[1].archetypes[2].deltaPoints = 101; }), false);
 assert.equal(invalidDraft(message => { message.impacts[2].archetypes[1].deltaPoints = 0.5; }), false);
 assert.equal(invalidDraft(message => { message.impacts[0].deltaPoints += 1; }), false);
+assert.equal(invalidDraft(message => { delete message.impacts[0].archetypes[0].afterScore; }), false);
+assert.equal(invalidDraft(message => { message.impacts[0].archetypes[0].afterStage = 'winning'; }), false);
+assert.equal(invalidDraft(message => { message.impacts[0].archetypes[0].completedAxes = ['auto_gate', 'auto_gate']; }), false);
 
 console.log('Protocol validation cases passed, including four-archetype draft impacts');
