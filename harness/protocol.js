@@ -7,6 +7,7 @@ const CARD_SOURCES = new Set(['runtime', 'catalog', 'unavailable']);
 const SHOP_ITEM_TYPES = new Set(['card', 'relic', 'potion', 'service']);
 const DRAFT_ARCHETYPE_IDS = ['auto_strike', 'exhaust', 'strength', 'block'];
 const DRAFT_ARCHETYPE_STAGES = new Set(['unformed', 'started', 'formed']);
+const DRAFT_ARCHETYPE_STATUSES = new Set(['missing_starter', 'incomplete_loop', 'operational', 'stable']);
 
 function validateCardSnapshot(card, prefix) {
   if (typeof card === 'string' && card) return { ok: true };
@@ -55,11 +56,20 @@ function validateReward(reward, prefix = 'reward') {
   if (reward.signature !== undefined && (typeof reward.signature !== 'string' || !reward.signature || reward.signature.length > 1024)) {
     return { ok: false, reason: `${prefix}.signature must be a non-empty string` };
   }
+  if (reward.opportunityId !== undefined && (typeof reward.opportunityId !== 'string' || !reward.opportunityId || reward.opportunityId.length > 128)) {
+    return { ok: false, reason: `${prefix}.opportunityId must be a non-empty string` };
+  }
+  if (reward.source !== undefined && reward.source !== 'combat' && reward.source !== 'event') {
+    return { ok: false, reason: `${prefix}.source must be combat or event` };
+  }
   return { ok: true };
 }
 
 function validateShop(shop, prefix = 'shop') {
   if (!shop || typeof shop !== 'object') return { ok: false, reason: `${prefix} must be an object` };
+  if (shop.visitId !== undefined && (typeof shop.visitId !== 'string' || !shop.visitId || shop.visitId.length > 128)) {
+    return { ok: false, reason: `${prefix}.visitId must be a non-empty string` };
+  }
   if (!Number.isFinite(shop.gold) || shop.gold < 0) return { ok: false, reason: `${prefix}.gold must be a non-negative number` };
   if (!Array.isArray(shop.items) || shop.items.length > 30) return { ok: false, reason: `${prefix}.items must be an array with at most 30 entries` };
   const indexes = new Set();
@@ -83,6 +93,9 @@ function validateShop(shop, prefix = 'shop') {
     }
     if (item.description !== undefined && item.description !== null && typeof item.description !== 'string') {
       return { ok: false, reason: `${prefix} item description must be a string or null` };
+    }
+    if (item.stockKey !== undefined && (typeof item.stockKey !== 'string' || !item.stockKey || item.stockKey.length > 64)) {
+      return { ok: false, reason: `${prefix} item stockKey must be a non-empty string` };
     }
     if (item.itemType === 'card') {
       if (!item.card || typeof item.card !== 'object') return { ok: false, reason: `${prefix} card item needs card details` };
@@ -329,6 +342,36 @@ function validateDraftImpactMessage(message) {
       }
       if (archetype.started !== undefined && typeof archetype.started !== 'boolean') {
         return { ok: false, reason: 'archetype started must be a boolean' };
+      }
+      const modern = ['readiness', 'status', 'beforeStatus', 'afterStatus', 'presentFunctions', 'missingFunctions', 'completedFunctions']
+        .filter(field => archetype[field] !== undefined);
+      if (modern.length && modern.length !== 7) {
+        return { ok: false, reason: 'archetype readiness fields must be provided together' };
+      }
+      if (modern.length === 7) {
+        if (!Number.isInteger(archetype.readiness) || archetype.readiness < 0 || archetype.readiness > 100
+          || archetype.readiness !== archetype.afterScore) {
+          return { ok: false, reason: 'archetype readiness must match afterScore' };
+        }
+        for (const field of ['status', 'beforeStatus', 'afterStatus']) {
+          if (!DRAFT_ARCHETYPE_STATUSES.has(archetype[field])) {
+            return { ok: false, reason: `archetype ${field} must be a known operating status` };
+          }
+        }
+        for (const field of ['presentFunctions', 'missingFunctions', 'completedFunctions']) {
+          if (!Array.isArray(archetype[field]) || archetype[field].length > 8) {
+            return { ok: false, reason: `archetype ${field} must be a function list` };
+          }
+          const ids = new Set();
+          for (const entry of archetype[field]) {
+            if (!entry || typeof entry.id !== 'string' || !entry.id || entry.id.length > 64
+              || typeof entry.label !== 'string' || !entry.label || entry.label.length > 64
+              || ids.has(entry.id)) {
+              return { ok: false, reason: `archetype ${field} entries need unique id and label` };
+            }
+            ids.add(entry.id);
+          }
+        }
       }
     }
     if (impact.deltaPoints !== impact.archetypes[0].deltaPoints) {

@@ -29,6 +29,7 @@ internal static class GameBuddyRewardOverlay
         public required Label NameLabel { get; init; }
         public required Label ScoreLabel { get; init; }
         public required Label DeltaLabel { get; init; }
+        public required Label FunctionLabel { get; init; }
         public required ColorRect Track { get; init; }
         public required ColorRect Fill { get; init; }
         public int ShownScore { get; set; }
@@ -275,7 +276,13 @@ internal static class GameBuddyRewardOverlay
             line.AddChild(track);
             line.AddChild(score);
             line.AddChild(delta);
-            body.AddChild(line);
+            var functions = MakeLabel(string.Empty, 12, Muted);
+            functions.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+            functions.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+            var block = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+            block.AddChild(line);
+            block.AddChild(functions);
+            body.AddChild(block);
             Rows.Add(new ScoreRow
             {
                 Id = id,
@@ -283,12 +290,13 @@ internal static class GameBuddyRewardOverlay
                 NameLabel = name,
                 ScoreLabel = score,
                 DeltaLabel = delta,
+                FunctionLabel = functions,
                 Track = track,
                 Fill = fill
             });
         }
 
-        var note = MakeLabel("构筑点不是胜率", 11, new Color(0.553f, 0.510f, 0.463f));
+        var note = MakeLabel("准备度不是胜率", 11, new Color(0.553f, 0.510f, 0.463f));
         note.HorizontalAlignment = HorizontalAlignment.Right;
         body.AddChild(note);
         frame.AddChild(body);
@@ -321,22 +329,33 @@ internal static class GameBuddyRewardOverlay
         var baseline = _impacts?.Values.FirstOrDefault();
         var scores = GameBuddyRewardImpactCodec.ArchetypeIds.Select(id => ScoreOf(baseline, id)).ToArray();
         var stages = GameBuddyRewardImpactCodec.ArchetypeIds.Select(id => StageOf(baseline, id)).ToArray();
-        var highestStage = stages.Length == 0 ? 0 : stages.Max(StageRank);
+        var ranks = GameBuddyRewardImpactCodec.ArchetypeIds.Select(id =>
+        {
+            var archetype = ArchetypeOf(baseline, id);
+            return archetype?.BeforeStatus is string status ? StatusRank(status) : StageRank(StageOf(baseline, id));
+        }).ToArray();
+        var highestStage = ranks.Length == 0 ? 0 : ranks.Max();
         var highest = scores.Select((score, index) => (score, index))
-            .Where(item => StageRank(stages[item.index]) == highestStage)
+            .Where(item => ranks[item.index] == highestStage)
             .Select(item => item.score)
             .DefaultIfEmpty(0)
             .Max();
         var leaders = scores.Select((score, index) => (score, index))
             .Where(item => highestStage > 0
-                && StageRank(stages[item.index]) == highestStage
+                && ranks[item.index] == highestStage
                 && item.score == highest)
             .ToArray();
         if (_stateLabel is not null)
         {
+            var leaderId = leaders.Length == 1 ? GameBuddyRewardImpactCodec.ArchetypeIds[leaders[0].index] : null;
+            var leaderArchetype = leaderId is null ? null : ArchetypeOf(baseline, leaderId);
+            var leaderPhrase = GameBuddyRewardImpactCodec.StatusPhrase(
+                leaderArchetype?.BeforeStatus,
+                GameBuddyRewardImpactCodec.HasPartialSupport(leaderArchetype));
             _stateLabel.Text = leaders.Length switch
             {
                 0 => "尚未启动",
+                1 when leaderPhrase.Length > 0 => $"主流派 · {Names[leaders[0].index]} · {leaderPhrase}",
                 1 => $"主流派 · {Names[leaders[0].index]} · {StageLabel(stages[leaders[0].index])}",
                 _ => "混合构筑"
             };
@@ -351,16 +370,29 @@ internal static class GameBuddyRewardOverlay
             var delta = hoveredImpact?.DeltaPoints ?? 0;
             var after = hoveredImpact?.AfterScore ?? before;
             var shownStage = hoveredImpact?.AfterStage ?? StageOf(baseline, row.Id);
-            var transition = StageRank(hoveredImpact?.AfterStage) > StageRank(hoveredImpact?.BeforeStage)
-                ? StageLabel(hoveredImpact?.AfterStage)
-                : string.Empty;
+            var currentArchetype = ArchetypeOf(baseline, row.Id);
+            var shownArchetype = hoveredImpact ?? currentArchetype;
+            var shownStatus = hoveredImpact is null
+                ? currentArchetype?.BeforeStatus ?? currentArchetype?.Status
+                : hoveredImpact.AfterStatus ?? hoveredImpact.Status;
             row.ShownScore = after;
             row.Leader = leaders.Any(item => item.index == index);
-            row.NameLabel.Text = $"{row.Name} · {StageLabel(shownStage)}";
+            row.NameLabel.Text = shownStatus is not null
+                ? GameBuddyRewardImpactCodec.FormatReadiness(
+                    row.Name,
+                    after,
+                    shownStatus,
+                    GameBuddyRewardImpactCodec.HasPartialSupport(shownArchetype))
+                : $"{row.Name} · {StageLabel(shownStage)}";
             row.ScoreLabel.Text = hoveredImpact is null ? before.ToString() : $"{before}→{after}";
-            row.DeltaLabel.Text = !string.IsNullOrEmpty(transition)
-                ? $" {transition}"
-                : delta == 0 ? string.Empty : " " + GameBuddyRewardImpactCodec.FormatSignedDelta(delta);
+            var beforeStatus = hoveredImpact?.BeforeStatus ?? currentArchetype?.BeforeStatus ?? currentArchetype?.Status;
+            var afterStatus = hoveredImpact?.AfterStatus ?? shownStatus;
+            row.DeltaLabel.Text = GameBuddyRewardImpactCodec.FormatDelta(delta, beforeStatus, afterStatus);
+            var shownFunctions = hoveredImpact ?? currentArchetype;
+            var currentFunctions = GameBuddyRewardImpactCodec.CurrentFunctions(currentArchetype);
+            var present = hoveredImpact is null ? currentFunctions.Present : shownFunctions?.PresentFunctions;
+            var missing = hoveredImpact is null ? currentFunctions.Missing : shownFunctions?.MissingFunctions;
+            row.FunctionLabel.Text = GameBuddyRewardImpactCodec.FormatFunctionLine(present, missing);
             row.DeltaLabel.AddThemeColorOverride("font_color", delta > 0 ? DeltaUp : DeltaDown);
             var nameColor = row.Leader ? Cream : Muted;
             var scoreColor = row.Leader ? BarLeader : Cream;
@@ -374,6 +406,17 @@ internal static class GameBuddyRewardOverlay
 
     private static string StageOf(DraftCardImpact? impact, string id) =>
         impact?.Archetypes.FirstOrDefault(item => item.Id == id)?.BeforeStage ?? "unformed";
+
+    private static DraftArchetypeImpact? ArchetypeOf(DraftCardImpact? impact, string id) =>
+        impact?.Archetypes.FirstOrDefault(item => item.Id == id);
+
+    private static int StatusRank(string? status) => status switch
+    {
+        "stable" => 3,
+        "operational" => 2,
+        "incomplete_loop" => 1,
+        _ => 0
+    };
 
     private static int StageRank(string? stage) => stage switch
     {

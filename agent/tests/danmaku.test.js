@@ -352,3 +352,73 @@ test('queued fixed comments cannot bunch up after a backlog or block AI', () => 
   assert.equal(d.tick()[0].text, '新鲜评论');
   assert.equal(d.queue.length, 0);
 });
+
+test('关键组件按机会和对象去重，优先于人格弹幕且不丢掉技能和建议', () => {
+  let now = 0;
+  const scheduled = [];
+  const adapter = new DanmakuBridgeAdapter({ now: () => now, schedule: callback => scheduled.push(callback) });
+  assert.equal(adapter.aiIntervalMs, 15_000);
+  const deck = [{ id: 'POMMEL_STRIKE', name: '剑柄打击' }, { id: 'STRIKE_IRONCLAD', name: '打击' }];
+  const live = state({ combat: false });
+  live.run.runId = 'run-key';
+  live.player.cards = deck;
+  live.player.gold = 120;
+  const reward = {
+    name: 'card.reward.opened',
+    data: {
+      opportunityId: 'reward:1',
+      signature: 'HELLRAISER:False',
+      source: 'combat',
+      cards: [{ id: 'HELLRAISER', name: '地狱狂徒', upgraded: false }]
+    }
+  };
+  adapter.syncKeyComponents(reward, live, 'run-key');
+  adapter.syncKeyComponents(reward, live, 'run-key');
+  assert.equal(adapter.director.queue.filter(item => item.source === 'key_component').length, 1);
+  assert.equal(adapter.director.queue[0].displayPriority, 7);
+  assert.equal(adapter.director.queue[0].contentKey, 'key:run-key:reward:1:card:HELLRAISER:false');
+  adapter.director.queue.push({
+    ...adapter.director.context,
+    id: 'skill-kept',
+    source: 'monster_skill',
+    text: '技能仍会播放',
+    contentKey: 'skill:kept',
+    displayPriority: 5,
+    dueAt: 0,
+    expiresAt: 100000,
+    generation: adapter.director.generation
+  });
+  adapter.director.queue.push({
+    ...adapter.director.context,
+    id: 'advice-kept',
+    source: 'recommendation',
+    text: '建议仍会播放',
+    contentKey: 'recommendation:kept',
+    displayPriority: 6,
+    dueAt: 0,
+    expiresAt: 100000,
+    generation: adapter.director.generation
+  });
+  const first = adapter.tick()[0];
+  assert.equal(first.source, 'key_component');
+  assert.match(first.text, /务必拿下/);
+  now = 500;
+  assert.equal(adapter.tick()[0].text, '建议仍会播放');
+  now = 1000;
+  assert.equal(adapter.tick()[0].text, '技能仍会播放');
+  adapter.syncKeyComponents(reward, live, 'run-key');
+  assert.equal(adapter.director.queue.some(item => item.source === 'key_component'), false);
+  assert.equal(scheduled.length, 0);
+
+  const eventReward = {
+    name: 'event.opened',
+    data: {
+      opportunityId: 'reward:event-1',
+      source: 'event',
+      cards: [{ id: 'HELLRAISER', name: '地狱狂徒', upgraded: false }]
+    }
+  };
+  adapter.syncKeyComponents(eventReward, live, 'run-key');
+  assert.equal(adapter.director.queue.filter(item => item.source === 'key_component').length, 1);
+  assert.match(adapter.director.queue[0].contentKey, /reward:event-1/);
+});

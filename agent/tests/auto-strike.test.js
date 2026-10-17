@@ -42,14 +42,15 @@ test('升级、遗物和牌组厚度改变同一候选的增量', () => {
   const thicker = autoStrikeScore([...base, ...Array(10).fill(defend)], []);
   assert.ok(upgraded > potentialNormal);
   assert.ok(withRelic >= normal);
-  assert.ok(thicker < autoStrikeScore(base, []));
+  assert.equal(thicker, autoStrikeScore(base, []));
 });
 
 test('非套路牌只交稀释税，未知卡不猜测', () => {
   const base = [hellraiser, pommel, ...Array(18).fill(defend)];
   const filler = autoStrikeImpact(base, [], ironWave);
-  assert.ok(filler.deltaPoints <= 0);
-  assert.equal(filler.reason, '稀释');
+  assert.equal(filler.deltaPoints, 0);
+  assert.equal(filler.deltaPoints, filler.afterScore - filler.beforeScore);
+  assert.equal(filler.reason, '不直接服务该流派');
   assert.ok(autoStrikeImpact(base, [], defend).deltaPoints <= 0);
   assert.equal(autoStrikeImpact(base, [], { id: 'UNKNOWN_MOD_CARD' }), null);
   assert.equal(isIronclad('ironclad'), true);
@@ -125,6 +126,15 @@ test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
         && Array.isArray(item.completedAxes))
   )));
   assert.deepEqual(message.impacts[0].archetypes.map(impact => impact.id), DRAFT_ARCHETYPE_IDS);
+  assert.ok(message.impacts.every(impact => impact.archetypes.every(item => (
+    item.deltaPoints === item.afterScore - item.beforeScore
+    && item.readiness === item.afterScore
+    && ['missing_starter', 'incomplete_loop', 'operational', 'stable'].includes(item.status)
+    && item.beforeStatus && item.afterStatus
+    && Array.isArray(item.presentFunctions)
+    && Array.isArray(item.missingFunctions)
+    && Array.isArray(item.completedFunctions)
+  ))));
   assert.equal(draftImpactMessage(event, 'silent', decorated), null);
   assert.equal(draftImpactMessage({ name: 'card.reward.opened', data: {} }, 'ironclad', decorated), null);
 });

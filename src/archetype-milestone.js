@@ -28,16 +28,32 @@
     block_conversion: '格挡转伤'
   };
   const STAGE_RANK = { unformed: 0, started: 1, formed: 2 };
+  const STATUS_RANK = { missing_starter: 0, incomplete_loop: 1, operational: 2, stable: 3 };
+  const STATUS_LABELS = {
+    missing_starter: '尚缺启动组件',
+    incomplete_loop: '已有启动，闭环尚未齐备',
+    operational: '可以运转',
+    stable: '稳定成型'
+  };
+
+  function usesStatus(archetype) {
+    return Boolean(archetype && (archetype.beforeStatus || archetype.afterStatus));
+  }
 
   function transitionFor(archetype) {
     if (!archetype || !(archetype.id in ARCHETYPE_LABELS)) return null;
-    if ((STAGE_RANK[archetype.afterStage] ?? -1) <= (STAGE_RANK[archetype.beforeStage] ?? -1)) return null;
+    const before = usesStatus(archetype) ? STATUS_RANK[archetype.beforeStatus] : STAGE_RANK[archetype.beforeStage];
+    const after = usesStatus(archetype) ? STATUS_RANK[archetype.afterStatus] : STAGE_RANK[archetype.afterStage];
+    if ((after ?? -1) <= (before ?? -1)) return null;
     return {
       id: archetype.id,
       name: ARCHETYPE_LABELS[archetype.id],
       beforeStage: archetype.beforeStage,
       afterStage: archetype.afterStage,
-      completedAxes: Array.isArray(archetype.completedAxes) ? archetype.completedAxes : []
+      beforeStatus: archetype.beforeStatus,
+      afterStatus: archetype.afterStatus,
+      completedAxes: Array.isArray(archetype.completedAxes) ? archetype.completedAxes : [],
+      completedFunctions: Array.isArray(archetype.completedFunctions) ? archetype.completedFunctions : []
     };
   }
 
@@ -46,10 +62,26 @@
       .map(transitionFor)
       .filter(Boolean)
       .sort((left, right) => {
-        const stage = STAGE_RANK[right.afterStage] - STAGE_RANK[left.afterStage];
-        return stage || ARCHETYPE_ORDER.indexOf(left.id) - ARCHETYPE_ORDER.indexOf(right.id);
+        const rank = item => item.afterStatus ? (STATUS_RANK[item.afterStatus] ?? -1) : (STAGE_RANK[item.afterStage] ?? -1);
+        return (rank(right) - rank(left)) || ARCHETYPE_ORDER.indexOf(left.id) - ARCHETYPE_ORDER.indexOf(right.id);
       });
     if (!transitions.length) return null;
+
+    if (transitions.some(item => item.afterStatus)) {
+      const stable = transitions.some(item => item.afterStatus === 'stable');
+      const operational = transitions.some(item => item.afterStatus === 'operational' || item.afterStatus === 'stable');
+      const names = transitions.map(item => item.name).join('、');
+      const status = stable ? 'stable' : operational ? 'operational' : transitions[0].afterStatus;
+      return {
+        signature: selection.signature,
+        cardId: selection.cardId,
+        upgraded: selection.upgraded,
+        level: status,
+        title: STATUS_LABELS[status],
+        message: `${names}：${STATUS_LABELS[status]}。`,
+        transitions
+      };
+    }
 
     const formed = transitions.some(item => item.afterStage === 'formed');
     const names = transitions.map(item => item.name).join('、');

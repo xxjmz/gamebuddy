@@ -301,4 +301,44 @@ assert.equal(invalidDraft(message => { delete message.impacts[0].archetypes[0].a
 assert.equal(invalidDraft(message => { message.impacts[0].archetypes[0].afterStage = 'winning'; }), false);
 assert.equal(invalidDraft(message => { message.impacts[0].archetypes[0].completedAxes = ['auto_gate', 'auto_gate']; }), false);
 
+const readinessDraft = JSON.parse(JSON.stringify(draftImpact));
+for (const impact of readinessDraft.impacts) {
+  for (const archetype of impact.archetypes) {
+    archetype.readiness = archetype.afterScore;
+    archetype.status = archetype.afterStage === 'started' ? 'operational' : 'missing_starter';
+    archetype.beforeStatus = 'missing_starter';
+    archetype.afterStatus = archetype.status;
+    archetype.presentFunctions = archetype.completedAxes.map(id => ({ id, label: id }));
+    archetype.missingFunctions = [{ id: 'auto_loop', label: '抽牌循环' }];
+    archetype.completedFunctions = archetype.presentFunctions;
+  }
+}
+assert.equal(validateDraftImpactMessage(readinessDraft).ok, true);
+assert.equal(validateDraftImpactMessage(draftImpact).ok, true);
+assert.equal(invalidDraft(message => {
+  message.impacts[0].archetypes[0].readiness = message.impacts[0].archetypes[0].afterScore;
+  message.impacts[0].archetypes[0].status = 'operational';
+}), false);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'card.reward.opened',
+  timestamp: Date.now(),
+  data: {
+    opportunityId: 'reward:1',
+    source: 'event',
+    signature: 'HELLRAISER:False',
+    cards: [{ id: 'HELLRAISER', name: '地狱狂徒' }]
+  }
+}).ok, true);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'shop.updated',
+  timestamp: Date.now(),
+  data: {
+    ...validShop,
+    visitId: 'shop:1',
+    items: [{ ...validShop.items[0], stockKey: 'card:2' }]
+  }
+}).ok, true);
+
 console.log('Protocol validation cases passed, including four-archetype draft impacts');

@@ -7,6 +7,13 @@
   const ORDER_INDEX = new Map(ORDER.map((id, index) => [id, index]));
   const STAGE_LABELS = Object.freeze({ unformed: '未启动', started: '已启动', formed: '已成型' });
   const STAGE_RANK = Object.freeze({ unformed: 0, started: 1, formed: 2 });
+  const STATUS_LABELS = Object.freeze({
+    missing_starter: '尚缺启动组件',
+    incomplete_loop: '已有启动，闭环尚未齐备',
+    operational: '可以运转',
+    stable: '稳定成型'
+  });
+  const STATUS_RANK = Object.freeze({ missing_starter: 0, incomplete_loop: 1, operational: 2, stable: 3 });
   const AXIS_LABELS = Object.freeze({
     auto_gate: '自动打击核心',
     auto_loop: '抽牌循环',
@@ -42,22 +49,44 @@
   function stageOf(item) {
     if (STAGE_LABELS[item?.stage]) return item.stage;
     if (item?.mature === true) return 'formed';
-    if (item?.started === true || Number(item?.score) >= 15) return 'started';
+    if (item?.started === true) return 'started';
     return 'unformed';
+  }
+
+  function statusOf(item) {
+    if (STATUS_LABELS[item?.status]) return item.status;
+    const stage = stageOf(item);
+    if (stage === 'formed') return 'stable';
+    if (stage === 'started') return 'operational';
+    return 'missing_starter';
+  }
+
+  function statusText(item) {
+    if (typeof item?.statusLabel === 'string' && item.statusLabel) return item.statusLabel;
+    const status = statusOf(item);
+    const label = STATUS_LABELS[status];
+    const partial = item?.partialKit === true
+      || (Array.isArray(item?.presentFunctions) && item.presentFunctions.length > 0 && status === 'missing_starter');
+    return partial ? `${label}；已有部分配套` : label;
+  }
+
+  function functionText(prefix, items) {
+    if (!Array.isArray(items) || !items.length) return '';
+    return `${prefix}${items.map(item => item.label || item.id).join('、')}`;
   }
 
   function buildStatus(scores) {
     const valid = ordered(scores).filter(item => Number.isFinite(item?.score));
     if (!valid.length) return { kind: 'unformed', label: '尚未成型', archetypeIds: [] };
-    const highestStage = Math.max(...valid.map(item => STAGE_RANK[stageOf(item)]));
+    const highestStage = Math.max(...valid.map(item => STATUS_RANK[statusOf(item)]));
     if (highestStage === 0) return { kind: 'unformed', label: '尚未启动', archetypeIds: [] };
-    const stageCandidates = valid.filter(item => STAGE_RANK[stageOf(item)] === highestStage);
+    const stageCandidates = valid.filter(item => STATUS_RANK[statusOf(item)] === highestStage);
     const highest = Math.max(...stageCandidates.map(item => item.score));
     const leaders = stageCandidates.filter(item => item.score === highest);
     if (leaders.length === 1) {
       return {
         kind: 'primary',
-        label: `主流派 · ${leaders[0].name} · ${STAGE_LABELS[stageOf(leaders[0])]}`,
+        label: `主流派 · ${leaders[0].name} · ${statusText(leaders[0])}`,
         archetypeIds: [leaders[0].id]
       };
     }
@@ -76,8 +105,10 @@
       ))[0]];
     }
     return candidates.sort((left, right) => (
-      Number((STAGE_RANK[right.afterStage] || 0) > (STAGE_RANK[right.beforeStage] || 0))
-        - Number((STAGE_RANK[left.afterStage] || 0) > (STAGE_RANK[left.beforeStage] || 0))
+      Number((STATUS_RANK[right.afterStatus || statusOf({ stage: right.afterStage })] || 0)
+        > (STATUS_RANK[right.beforeStatus || statusOf({ stage: right.beforeStage })] || 0))
+        - Number((STATUS_RANK[left.afterStatus || statusOf({ stage: left.afterStage })] || 0)
+        > (STATUS_RANK[left.beforeStatus || statusOf({ stage: left.beforeStage })] || 0))
       || Number(right.explicit === true) - Number(left.explicit === true)
       || Math.abs(right.deltaPoints) - Math.abs(left.deltaPoints)
       || (ORDER_INDEX.get(left.id) ?? ORDER.length) - (ORDER_INDEX.get(right.id) ?? ORDER.length)
@@ -91,9 +122,10 @@
     const rows = valid.map(item => {
       const score = Math.max(0, Math.min(100, Math.round(item.score)));
       const leader = status.archetypeIds.includes(item.id) ? ' leader' : '';
-      return `<div class="archetype-score${leader}"><div><span>${escapeHtml(item.name)} · ${STAGE_LABELS[stageOf(item)]}</span><strong>${score} 点</strong></div><div class="archetype-score-track"><span style="width:${score}%"></span></div></div>`;
+      const functions = [functionText('已有：', item.presentFunctions), functionText('尚缺：', item.missingFunctions)].filter(Boolean).join('。');
+      return `<div class="archetype-score${leader}"><div><span>${escapeHtml(item.name)}：准备度 ${score} / ${escapeHtml(statusText(item))}</span><strong>${score}</strong></div>${functions ? `<p>${escapeHtml(functions)}</p>` : ''}<div class="archetype-score-track"><span style="width:${score}%"></span></div></div>`;
     }).join('');
-    return `<section class="archetype-overview archetype-iron-plate"><div class="archetype-overview-head"><strong>铁甲构筑进度</strong><span class="archetype-build-state ${status.kind}">${escapeHtml(status.label)}</span></div>${rows}<div class="archetype-win-note">构筑点不是胜率</div></section>`;
+    return `<section class="archetype-overview archetype-iron-plate"><div class="archetype-overview-head"><strong>铁甲构筑进度</strong><span class="archetype-build-state ${status.kind}">${escapeHtml(status.label)}</span></div>${rows}<div class="archetype-win-note">准备度不是胜率</div></section>`;
   }
 
   function renderCardImpacts(impacts, scores) {
@@ -105,12 +137,16 @@
       const after = Math.round(Number.isFinite(item.afterScore) ? item.afterScore : before + delta);
       const tone = delta > 0 ? 'positive' : 'negative';
       const signed = `${delta > 0 ? '+' : ''}${delta}`;
-      const transitioned = (STAGE_RANK[item.afterStage] || 0) > (STAGE_RANK[item.beforeStage] || 0);
-      const milestone = transitioned ? ` · ${STAGE_LABELS[item.afterStage]}` : '';
-      const axes = Array.isArray(item.completedAxes) && item.completedAxes.length
-        ? `补齐：${item.completedAxes.map(axis => AXIS_LABELS[axis] || axis).join('、')}`
-        : item.reason;
-      return `<div class="archetype-impact ${tone}${transitioned ? ' milestone' : ''}" title="构筑点变化；构筑点不是胜率"><strong>${escapeHtml(item.name)} ${before} → ${after}（${signed}）${milestone}</strong><span>${escapeHtml(axes)}</span></div>`;
+      const beforeStatus = item.beforeStatus || statusOf({ stage: item.beforeStage });
+      const afterStatus = item.afterStatus || statusOf({ stage: item.afterStage });
+      const transitioned = (STATUS_RANK[afterStatus] || 0) > (STATUS_RANK[beforeStatus] || 0);
+      const milestone = transitioned ? ` · ${STATUS_LABELS[afterStatus]}` : '';
+      const completed = Array.isArray(item.completedFunctions) && item.completedFunctions.length
+        ? `补齐：${item.completedFunctions.map(entry => entry.label || entry.id).join('、')}`
+        : Array.isArray(item.completedAxes) && item.completedAxes.length
+          ? `补齐：${item.completedAxes.map(axis => AXIS_LABELS[axis] || axis).join('、')}`
+          : item.reason;
+      return `<div class="archetype-impact ${tone}${transitioned ? ' milestone' : ''}" title="准备度变化；准备度不是胜率"><strong>${escapeHtml(item.name)}：准备度 ${before} → ${after}（${signed}）${milestone}</strong><span>${escapeHtml(completed)}</span></div>`;
     }).join('');
     return `<div class="archetype-impacts">${rows}</div>`;
   }
@@ -118,6 +154,7 @@
   return {
     ORDER,
     STAGE_LABELS,
+    STATUS_LABELS,
     AXIS_LABELS,
     escapeHtml,
     buildStatus,

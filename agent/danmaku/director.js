@@ -4,7 +4,7 @@
 // 文案必须由 Mod/Codex 事实或本地固定模板显式传入，不在这里检索语料或调用模型。
 const safeText = value => String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
 const textKey = value => safeText(value).normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
-const SOURCE_NAMES = ['ai', 'original_template', 'monster_skill', 'recommendation', 'shared', 'other'];
+const SOURCE_NAMES = ['ai', 'original_template', 'monster_skill', 'recommendation', 'key_component', 'shared', 'other'];
 const sameScene = (left, right) => Boolean(left && right
   && left.runId === right.runId
   && left.sceneId === right.sceneId);
@@ -29,6 +29,7 @@ class DanmakuDirector {
     this.fixedIntervalMs = fixedIntervalMs;
     this.lastFixedEmittedAt = -Infinity;
     this.recentTexts = new Map();
+    this.presentedContentKeys = new Set();
     this.awaitingPresentation = new Map();
     this.presentedBySource = Object.fromEntries(SOURCE_NAMES.map(source => [source, 0]));
     this.context = null;
@@ -117,7 +118,7 @@ class DanmakuDirector {
         commentary,
         speaker: event.speaker || null,
         skillLabel: event.skillLabel || null,
-        displayPriority: wordingSource.source === 'recommendation' ? 6 : wordingSource.source === 'monster_skill' ? 5 : commentary?.momentId ? 4 : 2,
+        displayPriority: wordingSource.source === 'key_component' ? 7 : wordingSource.source === 'recommendation' ? 6 : wordingSource.source === 'monster_skill' ? 5 : commentary?.momentId ? 4 : 2,
         style: ['enemy_move', 'recommendation'].includes(event.trigger) ? 'tense' : 'warm',
         dueAt: start + index * interval,
         expiresAt: start + index * interval + 30_000
@@ -135,10 +136,60 @@ class DanmakuDirector {
     return { accepted: true, count: 0, reason: 'closed' };
   }
 
+  upsertKeyComponent(entry) {
+    if (!this.context || !entry?.contentKey || !safeText(entry.text)) return { accepted: false, reason: 'invalid_key_component' };
+    if (this.presentedContentKeys.has(entry.contentKey)) return { accepted: false, reason: 'already_presented' };
+    const now = this.now();
+    const existing = this.queue.find(item => item.source === 'key_component' && item.contentKey === entry.contentKey);
+    const next = {
+      schema: 'gamebuddy.danmaku.v1',
+      id: existing?.id || `key-${++this.counter}`,
+      batchId: existing?.batchId || `key-${this.counter}`,
+      ...this.context,
+      generation: this.generation,
+      trigger: 'key_component',
+      text: safeText(entry.text),
+      contentKey: entry.contentKey,
+      objectKeys: entry.objectKeys || [],
+      channel: entry.channel || 'reward',
+      sourceEventIds: existing?.sourceEventIds || [`key-${entry.contentKey}`],
+      recommendationId: null,
+      recommendation: null,
+      detail: entry.detail || null,
+      wordingSource: { type: 'key_component', source: 'key_component' },
+      source: 'key_component',
+      priority: 3,
+      commentary: null,
+      speaker: null,
+      skillLabel: null,
+      displayPriority: 7,
+      style: 'tense',
+      dueAt: existing?.dueAt ?? now,
+      expiresAt: now + 120_000,
+      reconfirm: entry.reconfirm || null
+    };
+    if (existing) {
+      Object.assign(existing, next, { id: existing.id, batchId: existing.batchId, dueAt: existing.dueAt });
+      return { accepted: true, updated: true, id: existing.id };
+    }
+    this.queue.push(next);
+    return { accepted: true, updated: false, id: next.id };
+  }
+
+  dropKeyComponents(predicate = () => true) {
+    const before = this.queue.length;
+    this.queue = this.queue.filter(item => item.source !== 'key_component' || !predicate(item));
+    return before - this.queue.length;
+  }
+
   tick(isRelevant = () => true) {
     const now = this.now();
     this.active = this.active.filter(item => item.until > now);
-    this.queue = this.queue.filter(item => item && item.expiresAt > now && item.generation === this.generation && isRelevant(item));
+    this.queue = this.queue.filter(item => {
+      if (!item || item.expiresAt <= now || item.generation !== this.generation || !isRelevant(item)) return false;
+      if (item.source === 'key_component' && typeof item.reconfirm === 'function' && item.reconfirm() === false) return false;
+      return true;
+    });
     if (now - this.lastEmitAt < this.gapMs) return [];
     this.queue = this.queue.filter(item => !(item.source === 'original_template' && item.dueAt <= now && now - this.lastFixedEmittedAt < this.fixedIntervalMs));
     const ready = this.queue.filter(item => item.dueAt <= now
@@ -160,6 +211,12 @@ class DanmakuDirector {
     this.lastEmitAt = now;
     this.recent = [...this.recent, message.text].slice(-20);
     this.recentTexts.set(message.contentKey, now);
+    if (message.source === 'key_component') {
+      this.presentedContentKeys.add(message.contentKey);
+      for (const objectKey of message.objectKeys || []) {
+        if (String(objectKey).startsWith('key:')) this.presentedContentKeys.add(objectKey);
+      }
+    }
     this.pruneTexts();
     this.awaitingPresentation.set(message.id, message.source);
     while (this.awaitingPresentation.size > 4096) this.awaitingPresentation.delete(this.awaitingPresentation.keys().next().value);
@@ -167,6 +224,7 @@ class DanmakuDirector {
   }
 
   contentKey(text, event) {
+    if (event?.contentKey) return event.contentKey;
     const key = textKey(text) || safeText(text);
     if (event.trigger === 'monster_skill') return `skill:${event.runId}:${event.sceneId}:${event.contentIdentity}:${key}`;
     // 不同决策即使短句相同，也可能对应新的有效建议。

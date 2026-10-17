@@ -465,7 +465,12 @@ public static class GameBuddyExporter
                 shop.Gold,
                 shop.Items
             }, decisionId: _activeShopDecisionId, observationMethod: "snapshot");
-            PublishEvent(eventName, shop);
+            PublishEvent(eventName, new
+            {
+                gold = shop.Gold,
+                items = shop.Items,
+                visitId = _activeShopDecisionId
+            });
             return;
         }
 
@@ -709,14 +714,15 @@ public static class GameBuddyExporter
                 card.Upgraded
             }).ToArray(),
             canSkip = true,
-            source = "combat"
+            source = GameBuddyRewardSource.FromRoom(snapshot.Run.Room)
         }, decisionId: _activeRewardDecisionId, observationMethod: "direct_hook");
         PublishEvent("card.reward.opened", new
         {
             cards = mapped,
             signature,
             canSkip = true,
-            source = "combat",
+            source = GameBuddyRewardSource.FromRoom(snapshot.Run.Room),
+            opportunityId = _activeRewardDecisionId,
             context = new
             {
                 act = snapshot.Run.Act,
@@ -856,26 +862,35 @@ public static class GameBuddyExporter
 
             var items = new List<ShopItemSnapshot>();
             var index = 0;
+            var cardSlot = 0;
             foreach (var entry in inventory.CardEntries)
             {
+                var stockKey = GameBuddyShopStock.Key("card", cardSlot);
+                cardSlot++;
                 var card = entry.CreationResult?.Card;
                 if (card is null || !entry.IsStocked) continue;
                 items.Add(MapShopItem(index++, "card", card.Id.Entry, FormatLoc(card.Title), entry, ReadTextMember(card, "Rarity", "CardRarity"),
-                    ReadTextMember(card, "DynamicDescription", "Description", "CanonicalDescription", "CardDescription"), MapCard(card)));
+                    ReadTextMember(card, "DynamicDescription", "Description", "CanonicalDescription", "CardDescription"), MapCard(card), stockKey));
             }
+            var relicSlot = 0;
             foreach (var entry in inventory.RelicEntries)
             {
+                var stockKey = GameBuddyShopStock.Key("relic", relicSlot);
+                relicSlot++;
                 var relic = entry.Model;
                 if (relic is null || !entry.IsStocked) continue;
                 items.Add(MapShopItem(index++, "relic", relic.Id.Entry, FormatLoc(relic.Title), entry, ReadTextMember(relic, "Rarity", "RelicRarity"),
-                    ReadTextMember(relic, "DynamicDescription", "Description"), null));
+                    ReadTextMember(relic, "DynamicDescription", "Description"), null, stockKey));
             }
+            var potionSlot = 0;
             foreach (var entry in inventory.PotionEntries)
             {
+                var stockKey = GameBuddyShopStock.Key("potion", potionSlot);
+                potionSlot++;
                 var potion = entry.Model;
                 if (potion is null || !entry.IsStocked) continue;
                 items.Add(MapShopItem(index++, "potion", potion.Id.Entry, FormatLoc(potion.Title), entry, ReadTextMember(potion, "Rarity", "PotionRarity"),
-                    ReadTextMember(potion, "DynamicDescription", "Description"), null));
+                    ReadTextMember(potion, "DynamicDescription", "Description"), null, stockKey));
             }
 
             var removalEntry = ReadMember(inventory, "CardRemovalEntry", "RemovalEntry", "PurgeEntry")
@@ -913,13 +928,14 @@ public static class GameBuddyExporter
         object entry,
         string? rarity,
         string? description,
-        CardSnapshot? card)
+        CardSnapshot? card,
+        string? stockKey = null)
     {
         var price = ReadIntValue(ReadMember(entry, "Price", "Cost", "CurrentPrice", "CurrentCost", "FinalPrice", "FinalCost", "_price", "_cost"));
         var affordable = ReadBoolMember(entry, "EnoughGold", "IsAffordable") ?? false;
         var stocked = ReadBoolMember(entry, "IsStocked", "Stocked", "Available") ?? true;
         var onSale = ReadBoolMember(entry, "OnSale", "IsOnSale", "Discounted") ?? false;
-        return new ShopItemSnapshot(index, itemType, id, name, price, affordable, stocked, onSale, rarity, description, card);
+        return new ShopItemSnapshot(index, itemType, id, name, price, affordable, stocked, onSale, rarity, description, card, stockKey);
     }
 
     private static MapSnapshot BuildMapSnapshot(RunState runState)
@@ -1356,7 +1372,7 @@ public sealed record CardSnapshot(
     string StarCostSource);
 public sealed record OwnedItemSnapshot(string Id, string Name);
 public sealed record ShopSnapshot(int Gold, List<ShopItemSnapshot> Items);
-public sealed record ShopItemSnapshot(int Index, string ItemType, string Id, string Name, int? Price, bool Affordable, bool Stocked, bool OnSale, string? Rarity, string? Description, CardSnapshot? Card);
+public sealed record ShopItemSnapshot(int Index, string ItemType, string Id, string Name, int? Price, bool Affordable, bool Stocked, bool OnSale, string? Rarity, string? Description, CardSnapshot? Card, string? StockKey = null);
 public sealed record MapSnapshot(
     List<string> Visited,
     string? Current,

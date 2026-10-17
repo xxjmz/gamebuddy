@@ -198,3 +198,47 @@ test('authoritative Mod run change clears memories even when a caller reuses its
   assert.notEqual(adapter.scope.sceneId, oldScene);
   assert.equal(adapter.memory.history.length, 0);
 });
+
+test('商店关键提醒在售出或离场前丢弃，无模型时仍立即发出且人格节奏不变', () => {
+  let now = 0;
+  const calls = [];
+  const adapter = new DanmakuBridgeAdapter({
+    now: () => now,
+    llmAtmosphere: { generate: async () => { calls.push('llm'); return { status: 'generated', phrases: [] }; } }
+  });
+  assert.equal(adapter.aiIntervalMs, 15_000);
+  const live = {
+    run: { runId: 'shop-run', act: 1, floor: 3, totalFloor: 3, room: 'shop', character: 'ironclad', currentCoord: '1,2' },
+    player: {
+      gold: 200,
+      cards: [{ id: 'POMMEL_STRIKE', name: '剑柄打击' }, { id: 'STRIKE_IRONCLAD', name: '打击' }],
+      relics: []
+    }
+  };
+  const shop = items => ({
+    name: 'shop.opened',
+    data: { visitId: 'shop:visit-1', gold: live.player.gold, items }
+  });
+  const hellraiser = { itemType: 'card', id: 'HELLRAISER', name: '地狱狂徒', price: 80, stocked: true, stockKey: 'card:2', card: { upgraded: false } };
+  const dummy = { itemType: 'relic', id: 'STRIKE_DUMMY', name: '打击木偶', price: 150, stocked: true, stockKey: 'relic:1' };
+  adapter.syncKeyComponents(shop([hellraiser, dummy]), live, 'shop-run');
+  assert.equal(calls.length, 0);
+  assert.equal(adapter.director.queue.filter(item => item.source === 'key_component').length, 1);
+  assert.equal((adapter.director.queue[0].text.match(/务必拿下/g) || []).length <= 1, true);
+  live.player.gold = 100;
+  adapter.syncKeyComponents({ ...shop([hellraiser, dummy]), name: 'shop.updated' }, live, 'shop-run');
+  assert.match(adapter.director.queue[0].text, /金币不足|只能优先其一|重点关注/);
+  assert.doesNotMatch(adapter.director.queue[0].text, /两件都可以/);
+  adapter.syncKeyComponents({ name: 'shop.updated', data: { visitId: 'shop:visit-1', gold: 100, items: [] } }, live, 'shop-run');
+  assert.equal(adapter.director.queue.some(item => item.source === 'key_component'), false);
+  adapter.syncKeyComponents(shop([hellraiser]), { ...live, player: { ...live.player, gold: 200 } }, 'shop-run');
+  adapter.syncKeyComponents({ name: 'shop.closed', data: {} }, live, 'shop-run');
+  assert.equal(adapter.director.queue.some(item => item.source === 'key_component'), false);
+  adapter.syncKeyComponents(shop([hellraiser]), { ...live, player: { ...live.player, gold: 10 } }, 'shop-run');
+  assert.match(adapter.director.queue[0].text, /金币不足/);
+  assert.doesNotMatch(adapter.director.queue[0].text, /务必拿下/);
+  now = 0;
+  assert.equal(adapter.tick()[0].source, 'key_component');
+  adapter.syncKeyComponents(shop([hellraiser]), { ...live, player: { ...live.player, gold: 10 } }, 'shop-run');
+  assert.equal(adapter.director.queue.some(item => item.source === 'key_component'), false);
+});

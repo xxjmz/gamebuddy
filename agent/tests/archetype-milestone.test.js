@@ -57,3 +57,35 @@ test('多流派跃迁合并为一条并优先展示成型', () => {
   assert.equal(feedback.transitions[0].id, 'exhaust');
   assert.equal(feedback.message, '消耗引擎、自动打击、力量叠加：核心循环完整了。');
 });
+
+test('只有确认拿牌且运转状态上升才反馈，预览和同分不庆祝', () => {
+  const tracker = createArchetypeMilestoneTracker();
+  tracker.cache(impact('HELLRAISER', [
+    {
+      id: 'auto_strike',
+      beforeStatus: 'missing_starter',
+      afterStatus: 'operational',
+      beforeStage: 'unformed',
+      afterStage: 'started',
+      beforeScore: 48,
+      afterScore: 52,
+      completedFunctions: [{ id: 'auto_gate', label: '自动打击启动' }]
+    },
+    { id: 'exhaust', beforeStatus: 'missing_starter', afterStatus: 'missing_starter', beforeStage: 'unformed', afterStage: 'unformed' },
+    { id: 'strength', beforeStatus: 'operational', afterStatus: 'operational', beforeStage: 'started', afterStage: 'started' },
+    { id: 'block', beforeStatus: 'missing_starter', afterStatus: 'missing_starter', beforeStage: 'unformed', afterStage: 'unformed' }
+  ]));
+  const feedback = tracker.confirm({ signature: 'reward-1', cardId: 'HELLRAISER', upgraded: false });
+  assert.equal(feedback.title, '可以运转');
+  assert.match(feedback.message, /自动打击：可以运转/);
+  assert.equal(tracker.confirm({ signature: 'reward-1', cardId: 'HELLRAISER', upgraded: false }), null);
+
+  const quiet = createArchetypeMilestoneTracker();
+  quiet.cache(impact('POMMEL_STRIKE', [
+    { id: 'auto_strike', beforeStatus: 'operational', afterStatus: 'operational', beforeScore: 40, afterScore: 46, beforeStage: 'started', afterStage: 'started' },
+    { id: 'exhaust', beforeStatus: 'missing_starter', afterStatus: 'missing_starter', beforeStage: 'unformed', afterStage: 'unformed' },
+    { id: 'strength', beforeStatus: 'missing_starter', afterStatus: 'missing_starter', beforeStage: 'unformed', afterStage: 'unformed' },
+    { id: 'block', beforeStatus: 'missing_starter', afterStatus: 'missing_starter', beforeStage: 'unformed', afterStage: 'unformed' }
+  ]));
+  assert.equal(quiet.confirm({ signature: 'reward-1', cardId: 'POMMEL_STRIKE', upgraded: false }), null);
+});

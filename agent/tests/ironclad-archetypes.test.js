@@ -76,7 +76,7 @@ test('矩阵校验拒绝未知角色、原因、条件和缺失流派键', () =>
   assert.throws(() => validateMatrix(missing), /must explicitly define/);
 });
 
-test('专注构筑成型且高于全卡杂牌堆', () => {
+test('专注构筑稳定成型，全卡杂牌堆不能只靠堆叠成型', () => {
   const allCards = cards.filter(card => card.color === 'ironclad');
   const doubledPile = [...allCards, ...allCards];
   const mixed = [
@@ -87,11 +87,14 @@ test('专注构筑成型且高于全卡杂牌堆', () => {
   for (const archetype of ARCHETYPES) {
     const focused = state(focusedDecks[archetype.id], archetype.id);
     const pile = state(allCards, archetype.id);
+    assert.equal(focused.status, 'stable', `${archetype.id} focused status`);
     assert.equal(focused.stage, 'formed', `${archetype.id} focused stage`);
     assert.equal(focused.mature, true, `${archetype.id} legacy mature`);
-    assert.ok(focused.score > pile.score, `${archetype.id} focused ${focused.score} pile ${pile.score}`);
+    assert.equal(focused.score, focused.readiness);
+    assert.notEqual(pile.status, 'stable', `${archetype.id} all-card pile status`);
     assert.notEqual(pile.stage, 'formed', `${archetype.id} all-card pile`);
     assert.notEqual(state(doubledPile, archetype.id).stage, 'formed', `${archetype.id} doubled pile`);
+    assert.ok(pile.score < 100, `${archetype.id} pile ${pile.score}`);
   }
   assert.ok(scoreIroncladArchetypes(mixed).every(item => item.stage !== 'formed'));
 });
@@ -115,7 +118,42 @@ test('起手和缺闸门组件保留潜力但不误报启动', () => {
   }
 });
 
-test('四套只有补齐最小闭环才能跨过 60 点启动线', () => {
+test('缺启动时未饱和配套仍能超过 59，补齐闭环不把准备度抬到 60', () => {
+  const loopOnly = deckOf(
+    ...Array(8).fill('POMMEL_STRIKE'),
+    ...Array(6).fill('PILLAGE'),
+    ...Array(4).fill('PERFECTED_STRIKE'),
+    ...Array(8).fill('STRIKE_IRONCLAD'),
+    ...Array(4).fill('TWIN_STRIKE'),
+    ...Array(3).fill('SHRUG_IT_OFF'),
+    ...Array(2).fill('OFFERING'),
+    'BASH', 'HEADBUTT', 'BURNING_PACT'
+  );
+  const missing = state(loopOnly, 'auto_strike');
+  const closed = state(deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE')), 'auto_strike');
+  assert.equal(missing.status, 'missing_starter');
+  assert.ok(missing.score > 59, `missing starter readiness ${missing.score}`);
+  assert.equal(missing.stage, 'unformed');
+  assert.match(missing.statusLabel, /尚缺启动组件/);
+  assert.match(missing.statusLabel, /已有部分配套/);
+  assert.equal(closed.status, 'operational');
+  assert.ok(closed.score < 60, `closed loop readiness ${closed.score}`);
+  assert.equal(closed.score, closed.readiness);
+  assert.equal(closed.stage, 'started');
+  assert.equal(closed.started, true);
+  assert.equal(closed.mature, false);
+
+  const onlyGate = state(deckOf('HELLRAISER', ...Array(9).fill('MANGLE')), 'auto_strike');
+  assert.equal(onlyGate.status, 'incomplete_loop');
+  assert.notEqual(onlyGate.status, 'operational');
+  const copies = Array.from({ length: 12 }, () => ({ id: 'POMMEL_STRIKE' }));
+  const stacked = state(copies, 'auto_strike');
+  assert.ok(stacked.score < 100, `stacked loop ${stacked.score}`);
+  assert.ok(score(copies.slice(0, 2), 'auto_strike') - score(copies.slice(0, 1), 'auto_strike')
+    > score(copies, 'auto_strike') - score(copies.slice(0, -1), 'auto_strike'));
+});
+
+test('运转状态看功能，地狱狂徒补齐后可以运转且主宰不能单独充当力量启动', () => {
   const cases = {
     auto_strike: {
       incomplete: deckOf('HELLRAISER', ...Array(9).fill('MANGLE')),
@@ -137,20 +175,28 @@ test('四套只有补齐最小闭环才能跨过 60 点启动线', () => {
   for (const [id, decks] of Object.entries(cases)) {
     const incomplete = state(decks.incomplete, id);
     const complete = state(decks.complete, id);
-    assert.ok(incomplete.score <= 59, `${id} incomplete ${incomplete.score}`);
+    assert.equal(incomplete.status, 'incomplete_loop', `${id} ${incomplete.status}`);
     assert.equal(incomplete.stage, 'unformed', `${id} incomplete stage`);
-    assert.ok(complete.score >= 60 && complete.score < 85, `${id} complete ${complete.score}`);
-    assert.equal(complete.stage, 'started', `${id} complete stage`);
+    assert.ok(['operational', 'stable'].includes(complete.status), `${id} ${complete.status}`);
+    assert.notEqual(complete.stage, 'unformed', `${id} complete stage`);
+    assert.equal(complete.score, complete.readiness);
+    if (id !== 'block') {
+      assert.equal(complete.status, 'operational', `${id} ${complete.status} ${complete.score}`);
+      assert.ok(complete.score < 60, `${id} complete readiness ${complete.score}`);
+    }
   }
-});
-
-test('60 点后由理想覆盖与稳定性拉开，85 点以上才可成型', () => {
   for (const archetype of ARCHETYPES) {
     const result = state(focusedDecks[archetype.id], archetype.id);
-    assert.ok(result.score >= 85 && result.score < 100, `${archetype.id} focused ${result.score}`);
+    assert.equal(result.status, 'stable', `${archetype.id} ${result.score}`);
     assert.equal(result.stage, 'formed');
     assert.ok(result.consistency >= 60);
+    assert.ok(result.score < 100);
   }
+  const dominate = state(deckOf('DOMINATE', ...Array(9).fill('MANGLE')), 'strength');
+  assert.equal(dominate.status, 'missing_starter');
+  assert.equal(dominate.presentFunctions.some(item => item.id === 'strength_source'), false);
+  const enabled = state(deckOf('INFLAME', 'DOMINATE', 'BASH'), 'strength');
+  assert.equal(enabled.presentFunctions.some(item => item.id === 'strength_source'), true);
 });
 
 test('中性过渡牌只影响闭环稳定性，反协同仍降低蓝图覆盖', () => {
@@ -160,7 +206,7 @@ test('中性过渡牌只影响闭环稳定性，反协同仍降低蓝图覆盖',
   const thickState = state(thick, 'auto_strike');
   assert.equal(thickState.blueprintScore, compactState.blueprintScore);
   assert.ok(thickState.consistency < compactState.consistency);
-  assert.ok(thickState.score < compactState.score);
+  assert.equal(thickState.readiness, compactState.readiness);
 
   const withNeutral = state([...compact, { id: 'MANGLE' }], 'auto_strike');
   const withConflict = state([...compact, { id: 'ANGER' }], 'auto_strike');
@@ -190,7 +236,7 @@ test('升级有效张数更高、重复边际递减且厚牌降低 setup', () =>
   const third = impact(twice, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
   assert.ok(upgraded > potentialNormal);
   assert.ok(first > second && second > third);
-  assert.ok(score([...once, ...filler(12)], 'auto_strike') < score(once, 'auto_strike'));
+  assert.equal(score([...once, ...filler(12)], 'auto_strike'), score(once, 'auto_strike'));
   assert.deepEqual(scoreIroncladArchetypes(base, []).map(item => item.id), ARCHETYPES.map(item => item.id));
 });
 
@@ -294,9 +340,10 @@ test('格挡来源和转伤先积累潜力，闸门与三轴组合最高', () =>
   assert.equal(state(conversionOnly, 'block').mature, false);
 });
 
-test('候选用 raw 差取整，首个正向结构组件有下限但重复和净负不保底', () => {
+test('候选增量等于前后准备度之差，重复和净负不保底', () => {
   const first = impact(neutral(60), { id: 'FIEND_FIRE' }, 'exhaust');
-  assert.ok(first.deltaPoints >= 1);
+  assert.equal(first.deltaPoints, first.afterScore - first.beforeScore);
+  assert.equal(first.readiness, first.afterScore);
   let repeatedDeck = [{ id: 'TWIN_STRIKE' }, ...neutral(10)];
   let repeated = impact(repeatedDeck, { id: 'TWIN_STRIKE' }, 'auto_strike');
   for (let count = 0; count < 20 && repeated.deltaPoints > 0; count += 1) {
@@ -331,6 +378,11 @@ test('候选输出前后阶段并只报告新补齐的直接结构轴', () => {
   const gate = impact(base, { id: 'HELLRAISER' }, 'auto_strike');
   assert.equal(gate.beforeStage, 'unformed');
   assert.equal(gate.afterStage, 'started');
+  assert.equal(gate.beforeStatus, 'missing_starter');
+  assert.equal(gate.afterStatus, 'operational');
+  assert.deepEqual(gate.completedFunctions.map(item => item.id), ['auto_gate']);
+  assert.equal(gate.deltaPoints, gate.afterScore - gate.beforeScore);
+  assert.ok(gate.afterScore < 60, `readiness ${gate.afterScore}`);
   assert.deepEqual(gate.completedAxes, ['auto_gate']);
   assert.equal(gate.beforeScore < gate.afterScore, true);
 
@@ -360,7 +412,7 @@ test('叠卡轴放慢而单卡槽仍由第一张完成', () => {
   assert.ok(secondPommel > 0 && secondPommel >= firstPommel * 0.45, `second pommel ${secondPommel}`);
   assert.ok(firstHellraiser > firstPommel, `hellraiser ${firstHellraiser}`);
   assert.ok(secondHellraiser <= firstHellraiser * 0.4, `second hellraiser ${secondHellraiser}`);
-  assert.ok(pommelAfterGate > 0 && pommelAfterGate < firstPommel, `pommel after activation ${pommelAfterGate}`);
+  assert.ok(pommelAfterGate > firstPommel, `pommel after activation ${pommelAfterGate} vs ${firstPommel}`);
   assert.ok(pillageAfterLoop > 0, `pillage ${pillageAfterLoop}`);
 
   const stacks = [

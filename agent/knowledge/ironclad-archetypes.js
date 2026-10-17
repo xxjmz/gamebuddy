@@ -223,8 +223,9 @@ const RELIC_INDEX = new Map([
   ['STRIKE_DUMMY', '打击木偶'], ['BAG_OF_PREPARATION', '准备背包'],
   ['CHARONS_ASHES', '卡戎之灰'], ['PAPER_MONEY', '纸钱'],
   ['VAJRA', '金刚杵'], ['GIRYA', '壶铃'], ['ANCHOR', '锚'],
-  ['CALIPERS', '外卡钳'], ['ORICHALCUM', '山铜']
+  ['CALIPERS', '外卡钳'], ['ORICHALCUM', '奥利哈钢']
 ].flatMap(([id, name]) => [[normalizeKey(id), id], [normalizeKey(name), id]]));
+RELIC_INDEX.set(normalizeKey('山铜'), 'ORICHALCUM');
 
 const CONFIG = Object.freeze({
   autoStrike: {
@@ -460,6 +461,159 @@ function structuralFactor(key, group, context) {
   return 1;
 }
 
+const KEY_FUNCTIONS = Object.freeze({
+  autoStrike: Object.freeze(['auto_gate', 'auto_loop', 'auto_payoff', 'auto_ammo']),
+  exhaust: Object.freeze(['exhaust_pain', 'exhaust_draw', 'exhaust_outlet', 'exhaust_event', 'exhaust_payoff']),
+  strength: Object.freeze(['strength_source', 'strength_multihit', 'strength_balance', 'strength_throughput']),
+  block: Object.freeze(['block_gate', 'block_conversion', 'block_source'])
+});
+const FUNCTION_LABELS = Object.freeze({
+  auto_gate: '自动打击启动',
+  auto_loop: '抽牌循环',
+  auto_payoff: '打击兑现',
+  auto_ammo: '打击弹药',
+  exhaust_pain: '疼痛格挡',
+  exhaust_draw: '消耗抽牌',
+  exhaust_outlet: '消耗出口',
+  exhaust_event: '消耗事件',
+  exhaust_payoff: '消耗兑现',
+  strength_source: '力量来源',
+  strength_multihit: '多段放大',
+  strength_balance: '力量平衡',
+  strength_throughput: '攻击吞吐',
+  block_gate: '格挡启动',
+  block_conversion: '格挡转伤',
+  block_source: '格挡来源'
+});
+const STATUS_LABELS = Object.freeze({
+  missing_starter: '尚缺启动组件',
+  incomplete_loop: '已有启动，闭环尚未齐备',
+  operational: '可以运转',
+  stable: '稳定成型'
+});
+const VULNERABLE_CARD_IDS = new Set([
+  'UPPERCUT', 'DOMINATE', 'TREMBLE', 'TAUNT', 'BASH', 'BREAK', 'THUNDERCLAP', 'MOLTEN_FIST'
+]);
+const STARTER_FUNCTIONS = Object.freeze({
+  autoStrike: Object.freeze(['auto_gate']),
+  exhaust: Object.freeze(['exhaust_pain', 'exhaust_draw']),
+  strength: Object.freeze(['strength_source']),
+  block: Object.freeze(['block_gate'])
+});
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function conditionFullyMet(condition, context) {
+  if (!condition) return true;
+  const active = context.active;
+  if (condition === 'strength_vulnerable_package') {
+    const unconditionalSource = context.copies.some(copy => {
+      const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id].strength;
+      return cell.group === 'strength_source' && cell.weight > 0 && !cell.condition;
+    });
+    const vulnerable = context.copies.some(copy => VULNERABLE_CARD_IDS.has(copy.id));
+    return unconditionalSource && vulnerable;
+  }
+  return {
+    auto_gate_active: Boolean(active.autoGate),
+    auto_attack_package: Boolean(active.autoAttackPackage),
+    auto_exhaust_package: Boolean(active.autoExhaustPackage),
+    auto_vulnerable_package: Boolean(active.autoVulnerablePackage),
+    exhaust_any_gate: active.exhaustGates > 0,
+    exhaust_both_gates: active.exhaustGates === 2,
+    exhaust_draw_active: active.exhaustGates > 0 && (context.groups.get('exhaust:exhaust_draw') || 0) > 0,
+    strength_source_active: Boolean(active.strengthSource),
+    block_gate_active: Boolean(active.blockGate),
+    block_conversion_active: Boolean(active.blockConversion)
+  }[condition] === true;
+}
+
+function enabledFunctionIds(key, context) {
+  const present = new Set();
+  for (const copy of context.copies) {
+    const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id][key];
+    if (!cell || cell.weight <= 0 || cell.group === 'none') continue;
+    if (!conditionFullyMet(cell.condition, context)) continue;
+    present.add(cell.group);
+  }
+  return present;
+}
+
+function functionViews(ids) {
+  return ids.map(id => Object.freeze({ id, label: FUNCTION_LABELS[id] || id }));
+}
+
+function operatingStatus(key, present, idealConsistency) {
+  const has = id => present.has(id);
+  if (key === 'autoStrike') {
+    const starter = has('auto_gate');
+    const loop = has('auto_loop') || has('auto_payoff') || has('auto_ammo');
+    if (starter && has('auto_loop') && has('auto_payoff') && has('auto_ammo') && idealConsistency >= 0.6) return 'stable';
+    if (starter && loop) return 'operational';
+    return starter ? 'incomplete_loop' : 'missing_starter';
+  }
+  if (key === 'exhaust') {
+    const starter = has('exhaust_pain') || has('exhaust_draw');
+    const progress = has('exhaust_outlet') || has('exhaust_event');
+    const stable = has('exhaust_pain') && has('exhaust_draw') && has('exhaust_outlet')
+      && (has('exhaust_event') || has('exhaust_payoff'))
+      && idealConsistency >= 0.6;
+    if (stable) return 'stable';
+    if (starter && progress) return 'operational';
+    return starter ? 'incomplete_loop' : 'missing_starter';
+  }
+  if (key === 'strength') {
+    const starter = has('strength_source');
+    const combat = has('strength_multihit') || has('strength_balance');
+    if (starter && combat && has('strength_throughput') && idealConsistency >= 0.6) return 'stable';
+    if (starter && combat) return 'operational';
+    return starter ? 'incomplete_loop' : 'missing_starter';
+  }
+  const ready = has('block_gate') && has('block_conversion') && has('block_source');
+  if (ready && idealConsistency >= 0.6) return 'stable';
+  if (ready) return 'operational';
+  return has('block_gate') ? 'incomplete_loop' : 'missing_starter';
+}
+
+function hasPartialKit(key, present) {
+  const starters = new Set(STARTER_FUNCTIONS[key]);
+  return KEY_FUNCTIONS[key].some(id => present.has(id) && !starters.has(id));
+}
+
+function statusLabelFor(status, partial) {
+  const label = STATUS_LABELS[status] || STATUS_LABELS.missing_starter;
+  return status === 'missing_starter' && partial ? `${label}；已有部分配套` : label;
+}
+
+function legacyStage(status) {
+  if (status === 'stable') return 'formed';
+  if (status === 'operational') return 'started';
+  return 'unformed';
+}
+
+function groupEnabledAmount(deck, key, group) {
+  const context = buildDeckContext(deck);
+  let amount = 0;
+  for (const copy of context.copies) {
+    const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id][key];
+    if (!cell || cell.group !== group || cell.weight <= 0) continue;
+    if (!conditionFullyMet(cell.condition, context)) continue;
+    amount += cell.weight * copy.effective;
+  }
+  return amount;
+}
+
+function archetypeHasDirectKit(deck, key) {
+  const context = buildDeckContext(deck);
+  const direct = new Set(CONFIG[key].direct);
+  return context.copies.some(copy => {
+    const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id][key];
+    return cell && cell.weight > 0 && direct.has(cell.group);
+  });
+}
+
 function scoreOneDetailed(key, deck, relics = []) {
   const context = buildDeckContext(deck);
   const config = CONFIG[key];
@@ -488,15 +642,17 @@ function scoreOneDetailed(key, deck, relics = []) {
   }
   const extraDraw = relicSet.has('BAG_OF_PREPARATION') ? 2 : 0;
   const setupComplete = axesSatisfied(context, key, config.setup);
-  let synergyCompletion = config.setupMax
+  const setupCompletion = config.setupMax
     * (setupComplete ? 1 : 0)
     * stackFullness(context, key, config.setup);
+  let synergyOnly = 0;
   for (const synergy of config.synergies) {
     if (synergy.groups.every(group => hasGroup(context, key, group))) {
       const weakestAxis = Math.min(...synergy.groups.map(group => context.groups.get(`${key}:${group}`) || 0));
-      synergyCompletion += saturated(synergy.maximum, weakestAxis) * stackFullness(context, key, synergy.groups);
+      synergyOnly += saturated(synergy.maximum, weakestAxis) * stackFullness(context, key, synergy.groups);
     }
   }
+  const synergyCompletion = setupCompletion + synergyOnly;
   const blueprintScore = Math.max(0, Math.min(100,
     baseAxisCoverage + gateCoverage + synergyCompletion + relevantRelics - antiSynergy));
   const coreClosed = axesSatisfied(context, key, config.coreLoop);
@@ -504,13 +660,20 @@ function scoreOneDetailed(key, deck, relics = []) {
   const idealConsistency = requirementReliability(context, key, config.ideal, extraDraw);
   const blueprintRatio = blueprintScore / 100;
   const idealCoverage = blueprintRatio * blueprintRatio;
-  const reliableCoverage = coreConsistency * Math.sqrt(blueprintRatio);
-  const raw = coreClosed
-    ? Math.max(60, Math.min(100, 60 + (25 * idealCoverage) + (15 * reliableCoverage)))
-    : Math.max(0, Math.min(59, blueprintScore));
-  const dilution = blueprintScore - raw;
+  const reliableCoverage = coreConsistency * Math.sqrt(Math.max(0, blueprintRatio));
+  const axisWeight = Object.values(config.axes).reduce((sum, value) => sum + value, 0) || 1;
+  const coveragePart = clamp(90 * (baseAxisCoverage + gateCoverage) / axisWeight, 0, 90);
+  const relicCapacity = Object.values(config.relics).reduce((sum, value) => sum + value, 0);
+  const synergyCapacity = config.synergies.reduce((sum, synergy) => sum + synergy.maximum, 0);
+  const bonusCapacity = config.setupMax + synergyCapacity + relicCapacity;
+  const synergyPart = bonusCapacity > 0
+    ? clamp(10 * (setupCompletion + synergyOnly + relevantRelics) / bonusCapacity, 0, 10)
+    : 0;
+  const readiness = Math.round(clamp(coveragePart + synergyPart - clamp(antiSynergy, 0, 15), 0, 100));
+  const present = enabledFunctionIds(key, context);
   return {
-    raw,
+    raw: readiness,
+    readiness,
     context,
     consistency: coreConsistency,
     idealConsistency,
@@ -519,13 +682,18 @@ function scoreOneDetailed(key, deck, relics = []) {
     coreClosed,
     blueprintScore,
     extraDraw,
+    present,
+    status: operatingStatus(key, present, idealConsistency),
     components: {
       baseAxisCoverage,
       gateCoverage,
+      setupCompletion,
       synergyCompletion,
       relevantRelics,
       antiSynergy,
-      dilution
+      coveragePart,
+      synergyPart,
+      dilution: blueprintScore - readiness
     }
   };
 }
@@ -534,26 +702,36 @@ function scoreOne(key, deck, relics = []) {
   return scoreOneDetailed(key, deck, relics).raw;
 }
 
+function describeArchetype(archetype, detail) {
+  const present = detail.present;
+  const status = detail.status;
+  const partial = hasPartialKit(archetype.key, present);
+  const functions = KEY_FUNCTIONS[archetype.key];
+  const stage = legacyStage(status);
+  const readiness = detail.readiness;
+  return {
+    id: archetype.id,
+    name: archetype.name,
+    score: readiness,
+    readiness,
+    blueprintScore: Math.round(detail.blueprintScore),
+    consistency: Math.round(detail.consistency * 100),
+    stage,
+    status,
+    statusLabel: statusLabelFor(status, partial),
+    partialKit: partial,
+    presentFunctions: functionViews(functions.filter(id => present.has(id))),
+    missingFunctions: functionViews(functions.filter(id => !present.has(id))),
+    started: status === 'operational' || status === 'stable',
+    mature: status === 'stable'
+  };
+}
+
 function scoreIroncladArchetypes(deck, relics = []) {
-  return ARCHETYPES.map(archetype => {
-    const detail = scoreOneDetailed(archetype.key, deck, relics);
-    const score = Math.round(detail.raw);
-    const config = CONFIG[archetype.key];
-    const started = score >= 60 && detail.coreClosed;
-    const mature = score >= 85
-      && detail.consistency >= 0.6
-      && axesSatisfied(detail.context, archetype.key, config.ideal);
-    return {
-      id: archetype.id,
-      name: archetype.name,
-      score,
-      blueprintScore: Math.round(detail.blueprintScore),
-      consistency: Math.round(detail.consistency * 100),
-      stage: mature ? 'formed' : started ? 'started' : 'unformed',
-      started,
-      mature
-    };
-  });
+  return ARCHETYPES.map(archetype => describeArchetype(
+    archetype,
+    scoreOneDetailed(archetype.key, deck, relics)
+  ));
 }
 
 function reasonFor(cell, deltaPoints, rawDelta = deltaPoints) {
@@ -570,24 +748,23 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
   const afterContext = buildDeckContext([...(deck || []), candidate]);
   return ARCHETYPES.map((archetype, index) => {
     const cell = IRONCLAD_ARCHETYPE_MATRIX[id][archetype.key];
-    const rawBefore = scoreOne(archetype.key, deck, relics);
-    const rawAfter = scoreOne(archetype.key, [...(deck || []), candidate], relics);
-    const rawDelta = rawAfter - rawBefore;
-    let deltaPoints = Math.round(rawDelta);
+    const deltaPoints = after[index].score - before[index].score;
     const config = CONFIG[archetype.key];
-    const firstDirectComponent = config.direct.includes(cell.group)
-      && !hasGroup(beforeContext, archetype.key, cell.group);
-    const firstExplicitComponent = cell.role !== 'neutral'
-      && cell.weight > 0
-      && !hasGroup(beforeContext, archetype.key, cell.group);
-    if (rawDelta > 0 && deltaPoints === 0 && (firstDirectComponent || firstExplicitComponent)) deltaPoints = 1;
-    if (rawDelta < 0 && deltaPoints === 0 && cell.weight < 0) deltaPoints = -1;
-    if (Object.is(deltaPoints, -0)) deltaPoints = 0;
+    const completedFunctions = after[index].presentFunctions.filter(item => (
+      !before[index].presentFunctions.some(existing => existing.id === item.id)
+    ));
     return {
       id: archetype.id,
       name: archetype.name,
       beforeScore: before[index].score,
       afterScore: after[index].score,
+      readiness: after[index].readiness,
+      status: after[index].status,
+      beforeStatus: before[index].status,
+      afterStatus: after[index].status,
+      presentFunctions: after[index].presentFunctions,
+      missingFunctions: after[index].missingFunctions,
+      completedFunctions,
       beforeStage: before[index].stage,
       afterStage: after[index].stage,
       completedAxes: config.direct.filter(group => (
@@ -597,7 +774,7 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
       started: before[index].started,
       deltaPoints,
       role: cell.role,
-      reason: reasonFor(cell, deltaPoints, rawDelta),
+      reason: reasonFor(cell, deltaPoints, deltaPoints),
       explicit: cell.role !== 'neutral'
     };
   });
@@ -646,9 +823,17 @@ module.exports = {
   REASONS,
   IRONCLAD_ARCHETYPE_MATRIX,
   validateMatrix,
+  KEY_FUNCTIONS,
+  FUNCTION_LABELS,
+  STATUS_LABELS,
   scoreIroncladArchetypes,
   impactIroncladArchetypes,
   decorateIroncladArchetypes,
   generateMatrixMarkdown,
-  isIronclad
+  isIronclad,
+  cardId,
+  conditionFullyMet,
+  groupEnabledAmount,
+  archetypeHasDirectKit,
+  buildDeckContext
 };

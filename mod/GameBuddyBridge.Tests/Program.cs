@@ -102,6 +102,76 @@ Assert(GameBuddyRewardImpactCodec.FormatLine(
 Assert(GameBuddyRewardImpactCodec.FormatProgress(42, 0) == "42", "Zero delta should keep the current score only.");
 Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(14) == "+14", "Positive delta sign is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(-2) == "-2", "Negative delta sign is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatReadiness("自动打击流", 72, "missing_starter", true)
+    == "自动打击流：准备度 72 / 尚缺启动组件；已有部分配套",
+    "Readiness overlay text is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatReadiness("自动打击流", 52, "operational", false)
+    == "自动打击流：准备度 52 / 可以运转",
+    "Operational readiness text is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatFunctionLine(
+    [new DraftFunction("auto_loop", "抽牌循环")],
+    [new DraftFunction("auto_gate", "自动打击启动")])
+    == "已有：抽牌循环。尚缺：自动打击启动",
+    "Function line should show present and missing labels.");
+Assert(GameBuddyRewardImpactCodec.FormatDelta(4, "missing_starter", "operational")
+    == " +4 · 尚缺启动组件 → 可以运转",
+    "Status transition must keep the numeric delta.");
+Assert(GameBuddyRewardImpactCodec.FormatDelta(2, "operational", "operational")
+    == " +2",
+    "Unchanged status should keep only the delta.");
+var current = GameBuddyRewardImpactCodec.CurrentFunctions(new DraftArchetypeImpact(
+    "auto_strike", 4, null, 48, false, 52, "unformed", "started", ["auto_gate"],
+    52, "operational", "missing_starter", "operational",
+    [new DraftFunction("auto_gate", "自动打击启动"), new DraftFunction("auto_loop", "抽牌循环")],
+    [new DraftFunction("auto_payoff", "打击兑现")],
+    [new DraftFunction("auto_gate", "自动打击启动")]));
+Assert(current.Present.Select(item => item.Id).SequenceEqual(["auto_loop"]),
+    "Current functions must not treat the hovered card as already owned.");
+Assert(current.Missing.Select(item => item.Id).SequenceEqual(["auto_payoff", "auto_gate"]),
+    "A not-yet-taken starter stays missing until the deck confirms it.");
+Assert(GameBuddyRewardSource.FromRoom("Event") == "event", "Event room should open an event reward source.");
+Assert(GameBuddyRewardSource.FromRoom("Monster") == "combat", "Monster room should open a combat reward source.");
+var stockKeys = GameBuddyShopStock.StockedKeys([
+    ("card", true),
+    ("card", false),
+    ("card", true),
+    ("relic", true)
+]);
+Assert(stockKeys.SequenceEqual(["card:0", "card:2", "relic:0"]),
+    "Sold shop slots must keep their original stock keys.");
+var readinessArchetype = new Dictionary<string, object?>
+{
+    ["id"] = "auto_strike",
+    ["deltaPoints"] = 4,
+    ["beforeScore"] = 48,
+    ["afterScore"] = 52,
+    ["beforeStage"] = "unformed",
+    ["afterStage"] = "started",
+    ["completedAxes"] = new[] { "auto_gate" },
+    ["readiness"] = 52,
+    ["status"] = "operational",
+    ["beforeStatus"] = "missing_starter",
+    ["afterStatus"] = "operational",
+    ["presentFunctions"] = new[] { new { id = "auto_gate", label = "自动打击启动" } },
+    ["missingFunctions"] = new[] { new { id = "auto_loop", label = "抽牌循环" } },
+    ["completedFunctions"] = new[] { new { id = "auto_gate", label = "自动打击启动" } }
+};
+var readinessMessage = Message(new Dictionary<string, object?>
+{
+    ["cardId"] = "HELLRAISER",
+    ["deltaPoints"] = 4,
+    ["archetypes"] = new[]
+    {
+        readinessArchetype,
+        Archetype("exhaust", 0),
+        Archetype("strength", 0),
+        Archetype("block", 0)
+    }
+});
+Assert(GameBuddyRewardImpactCodec.TryParse(readinessMessage, out var readinessParsed)
+    && readinessParsed!.Impacts["HELLRAISER"].Archetypes[0].Readiness == 52
+    && readinessParsed.Impacts["HELLRAISER"].Archetypes[0].AfterStatus == "operational",
+    "Ironclad readiness fields should decode.");
 var withScore = ValidArchetypes();
 withScore[0] = Archetype("auto_strike", 8, 9);
 Assert(GameBuddyRewardImpactCodec.TryParse(Message(Card("ANGER", 8, withScore)), out var scored)

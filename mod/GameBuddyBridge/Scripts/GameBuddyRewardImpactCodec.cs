@@ -2,6 +2,7 @@ using System.Text.Json;
 
 namespace GameBuddyBridge.Scripts;
 
+internal sealed record DraftFunction(string Id, string Label);
 internal sealed record DraftArchetypeImpact(
     string Id,
     int DeltaPoints,
@@ -11,7 +12,14 @@ internal sealed record DraftArchetypeImpact(
     int? AfterScore = null,
     string? BeforeStage = null,
     string? AfterStage = null,
-    IReadOnlyList<string>? CompletedAxes = null);
+    IReadOnlyList<string>? CompletedAxes = null,
+    int? Readiness = null,
+    string? Status = null,
+    string? BeforeStatus = null,
+    string? AfterStatus = null,
+    IReadOnlyList<DraftFunction>? PresentFunctions = null,
+    IReadOnlyList<DraftFunction>? MissingFunctions = null,
+    IReadOnlyList<DraftFunction>? CompletedFunctions = null);
 internal sealed record DraftCardImpact(
     string CardId,
     int DeltaPoints,
@@ -25,6 +33,14 @@ internal static class GameBuddyRewardImpactCodec
     private static readonly string[] ChineseNames = ["自动打击", "消耗引擎", "力量叠加", "格挡壁垒"];
     private static readonly string[] EnglishNames = ["Auto Strike", "Exhaust", "Strength", "Block"];
     private static readonly HashSet<string> Stages = ["unformed", "started", "formed"];
+    private static readonly HashSet<string> Statuses = ["missing_starter", "incomplete_loop", "operational", "stable"];
+    private static readonly Dictionary<string, string> StatusLabels = new()
+    {
+        ["missing_starter"] = "尚缺启动组件",
+        ["incomplete_loop"] = "已有启动，闭环尚未齐备",
+        ["operational"] = "可以运转",
+        ["stable"] = "稳定成型"
+    };
 
     internal static bool TryParse(string json, out DraftImpactMessage? message)
     {
@@ -141,6 +157,30 @@ internal static class GameBuddyRewardImpactCodec
                 if (startedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) return false;
                 started = startedElement.GetBoolean();
             }
+            int? readiness = null;
+            string? status = null;
+            string? beforeStatus = null;
+            string? afterStatus = null;
+            IReadOnlyList<DraftFunction>? presentFunctions = null;
+            IReadOnlyList<DraftFunction>? missingFunctions = null;
+            IReadOnlyList<DraftFunction>? completedFunctions = null;
+            var modernFields = new[] { "readiness", "status", "beforeStatus", "afterStatus", "presentFunctions", "missingFunctions", "completedFunctions" };
+            var modernCount = modernFields.Count(field => archetypeElement.TryGetProperty(field, out _));
+            if (modernCount is not 0 and not 7) return false;
+            if (modernCount == 7)
+            {
+                if (!archetypeElement.GetProperty("readiness").TryGetInt32(out var readinessValue)
+                    || readinessValue != afterScore) return false;
+                status = archetypeElement.GetProperty("status").GetString();
+                beforeStatus = archetypeElement.GetProperty("beforeStatus").GetString();
+                afterStatus = archetypeElement.GetProperty("afterStatus").GetString();
+                if (status is null || beforeStatus is null || afterStatus is null
+                    || !Statuses.Contains(status) || !Statuses.Contains(beforeStatus) || !Statuses.Contains(afterStatus)) return false;
+                if (!TryParseFunctions(archetypeElement.GetProperty("presentFunctions"), out presentFunctions)
+                    || !TryParseFunctions(archetypeElement.GetProperty("missingFunctions"), out missingFunctions)
+                    || !TryParseFunctions(archetypeElement.GetProperty("completedFunctions"), out completedFunctions)) return false;
+                readiness = readinessValue;
+            }
             if (!byId.TryAdd(id, new DraftArchetypeImpact(
                 id,
                 archetypeDelta,
@@ -150,7 +190,14 @@ internal static class GameBuddyRewardImpactCodec
                 afterScore,
                 beforeStage,
                 afterStage,
-                completedAxes.ToArray()))) return false;
+                completedAxes.ToArray(),
+                readiness,
+                status,
+                beforeStatus,
+                afterStatus,
+                presentFunctions,
+                missingFunctions,
+                completedFunctions))) return false;
         }
 
         var ordered = ArchetypeIds.Select(id => byId[id]).ToArray();
@@ -163,6 +210,87 @@ internal static class GameBuddyRewardImpactCodec
             legacyReason = legacyReasonElement.GetString();
         }
         impact = new DraftCardImpact(cardId, legacyDelta, legacyReason, ordered);
+        return true;
+    }
+
+    internal static string StatusPhrase(string? status, bool partial)
+    {
+        if (status is null || !StatusLabels.TryGetValue(status, out var label)) return string.Empty;
+        return status == "missing_starter" && partial ? $"{label}；已有部分配套" : label;
+    }
+
+    internal static string FormatReadiness(string name, int readiness, string? status, bool partial)
+    {
+        var phrase = StatusPhrase(status, partial);
+        if (phrase.Length == 0) return $"{name} {readiness}";
+        return $"{name}：准备度 {readiness} / {phrase}";
+    }
+
+    internal static string FormatFunctionLine(IEnumerable<DraftFunction>? present, IEnumerable<DraftFunction>? missing)
+    {
+        var parts = new List<string>();
+        var presentText = string.Join("、", (present ?? []).Select(item => item.Label).Where(label => label.Length > 0));
+        var missingText = string.Join("、", (missing ?? []).Select(item => item.Label).Where(label => label.Length > 0));
+        if (presentText.Length > 0) parts.Add($"已有：{presentText}");
+        if (missingText.Length > 0) parts.Add($"尚缺：{missingText}");
+        return string.Join("。", parts);
+    }
+
+    internal static (IReadOnlyList<DraftFunction> Present, IReadOnlyList<DraftFunction> Missing) CurrentFunctions(DraftArchetypeImpact? impact)
+    {
+        if (impact is null) return ([], []);
+        var completed = new HashSet<string>(impact.CompletedFunctions?.Select(item => item.Id) ?? [], StringComparer.Ordinal);
+        var present = (impact.PresentFunctions ?? []).Where(item => !completed.Contains(item.Id)).ToArray();
+        var missing = (impact.MissingFunctions ?? []).Concat(impact.CompletedFunctions ?? []).ToArray();
+        return (present, missing);
+    }
+
+    internal static string FormatDelta(int delta, string? beforeStatus, string? afterStatus)
+    {
+        var signed = delta == 0 ? string.Empty : FormatSignedDelta(delta);
+        var before = StatusPhrase(beforeStatus, false);
+        var after = StatusPhrase(afterStatus, false);
+        var transition = before.Length > 0 && after.Length > 0 && beforeStatus != afterStatus
+            ? $"{before} → {after}"
+            : string.Empty;
+        if (signed.Length == 0) return transition.Length == 0 ? string.Empty : " " + transition;
+        if (transition.Length == 0) return " " + signed;
+        return $" {signed} · {transition}";
+    }
+
+    internal static bool HasPartialSupport(DraftArchetypeImpact? impact)
+    {
+        if (impact?.PresentFunctions is null || impact.PresentFunctions.Count == 0) return false;
+        var starters = impact.Id switch
+        {
+            "auto_strike" => new[] { "auto_gate" },
+            "exhaust" => new[] { "exhaust_pain", "exhaust_draw" },
+            "strength" => new[] { "strength_source" },
+            "block" => new[] { "block_gate" },
+            _ => Array.Empty<string>()
+        };
+        return impact.PresentFunctions.Any(item => !starters.Contains(item.Id));
+    }
+
+    private static bool TryParseFunctions(JsonElement element, out IReadOnlyList<DraftFunction>? functions)
+    {
+        functions = null;
+        if (element.ValueKind != JsonValueKind.Array || element.GetArrayLength() > 8) return false;
+        var parsed = new List<DraftFunction>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in element.EnumerateArray())
+        {
+            if (entry.ValueKind != JsonValueKind.Object
+                || !entry.TryGetProperty("id", out var idElement)
+                || !entry.TryGetProperty("label", out var labelElement)
+                || idElement.ValueKind != JsonValueKind.String
+                || labelElement.ValueKind != JsonValueKind.String) return false;
+            var id = idElement.GetString();
+            var label = labelElement.GetString();
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(label) || id.Length > 64 || label.Length > 64 || !ids.Add(id)) return false;
+            parsed.Add(new DraftFunction(id, label));
+        }
+        functions = parsed;
         return true;
     }
 

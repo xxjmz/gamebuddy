@@ -485,6 +485,14 @@ function handleAcceptedEvent(event) {
     cardName: event.data?.cardName || event.data?.card?.name
   }).catch(error => console.warn('GameBuddy danmaku event skipped:', error.message));
   const liveState = observationStore.getObservation()?.state;
+  const keyRunId = liveState?.run?.runId || agentRunId;
+  if (keyRunId) {
+    try {
+      danmakuAdapter.syncKeyComponents(event, liveState, keyRunId);
+    } catch (error) {
+      console.warn('GameBuddy key component alert skipped:', error.message);
+    }
+  }
   const displayEvent = event.name === 'card.reward.opened' && Array.isArray(event.data?.cards)
     ? {
       ...event,

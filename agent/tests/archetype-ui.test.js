@@ -18,7 +18,7 @@ const scores = [
 test('主流派状态覆盖阈值、唯一最高、并列和未成型', () => {
   assert.deepEqual(buildStatus(scores), {
     kind: 'primary',
-    label: '主流派 · 消耗引擎 · 已启动',
+    label: '主流派 · 消耗引擎 · 可以运转',
     archetypeIds: ['exhaust']
   });
   assert.equal(buildStatus(scores.map(item => ({ ...item, score: item.id === 'auto_strike' ? 42 : item.score }))).kind, 'mixed');
@@ -54,11 +54,11 @@ test('全是纯稀释时只显示当前最高流派的一条', () => {
 test('铜铁面板显示四套构筑点和阶段，候选给出真实前后点数与跃迁', () => {
   const overview = renderOverview(scores);
   assert.match(overview, /archetype-iron-plate/);
-  assert.match(overview, /构筑点不是胜率/);
-  assert.match(overview, /主流派 · 消耗引擎 · 已启动/);
+  assert.match(overview, /准备度不是胜率/);
+  assert.match(overview, /主流派 · 消耗引擎 · 可以运转/);
   for (const item of scores) {
     assert.match(overview, new RegExp(item.name));
-    assert.match(overview, new RegExp(`>${item.score} 点<`));
+    assert.match(overview, new RegExp(`准备度 ${item.score}`));
   }
   const positive = renderCardImpacts([
     {
@@ -74,12 +74,13 @@ test('铜铁面板显示四套构筑点和阶段，候选给出真实前后点�
       explicit: true, reason: '稀释'
     }
   ], scores);
-  assert.match(positive, /消耗引擎 42 → 45（\+3） · 已启动/);
+  assert.match(positive, /消耗引擎：准备度 42 → 45（\+3） · 可以运转/);
   assert.match(positive, /补齐：消耗出口/);
   assert.match(positive, /milestone/);
   assert.match(positive, /archetype-impact positive/);
   assert.doesNotMatch(positive, /%/);
-  assert.match(negative, /力量叠加 18 → 16（-2）/);
+  assert.match(negative, /力量叠加：准备度 18 → 16（-2）/);
+  assert.doesNotMatch(negative, /可以运转|稳定成型|已启动|已成型/);
   assert.match(negative, /archetype-impact negative/);
 });
 
@@ -96,5 +97,38 @@ test('流派 HTML 输出转义名称和原因', () => {
   assert.doesNotMatch(overview, /<img/);
   assert.doesNotMatch(impacts, /<img/);
   assert.match(impacts, /&lt;img/);
-  assert.match(impacts, /构筑点不是胜率/);
+  assert.match(impacts, /准备度不是胜率/);
+});
+
+test('准备度文案列出运转状态和功能，分数上升但不改状态时不显示启动', () => {
+  const overview = renderOverview([{
+    id: 'auto_strike',
+    name: '自动打击流',
+    score: 72,
+    readiness: 72,
+    status: 'missing_starter',
+    statusLabel: '尚缺启动组件；已有部分配套',
+    presentFunctions: [{ id: 'auto_loop', label: '抽牌循环' }],
+    missingFunctions: [{ id: 'auto_gate', label: '自动打击启动' }]
+  }]);
+  assert.match(overview, /自动打击流：准备度 72 \/ 尚缺启动组件；已有部分配套/);
+  assert.match(overview, /已有：抽牌循环/);
+  assert.match(overview, /尚缺：自动打击启动/);
+  const sameStatus = renderCardImpacts([{
+    id: 'auto_strike',
+    name: '自动打击流',
+    beforeScore: 70,
+    afterScore: 72,
+    deltaPoints: 2,
+    beforeStatus: 'missing_starter',
+    afterStatus: 'missing_starter',
+    beforeStage: 'unformed',
+    afterStage: 'unformed',
+    completedAxes: [],
+    completedFunctions: [],
+    explicit: true,
+    reason: '抽牌'
+  }], []);
+  assert.match(sameStatus, /准备度 70 → 72（\+2）/);
+  assert.doesNotMatch(sameStatus, /可以运转|稳定成型|启动|成型/);
 });

@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardImpactCodec.cs" Link="GameBuddyRewardImpactCodec.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyShopStock.cs" Link="GameBuddyShopStock.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardCandidateSelector.cs" Link="GameBuddyRewardCandidateSelector.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardSelectionTracker.cs" Link="GameBuddyRewardSelectionTracker.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddySaveLoadLog.cs" Link="GameBuddySaveLoadLog.cs" />

@@ -8,6 +8,7 @@ const { createMonsterDisplayName } = require('./monster-identity');
 const { buildSharedScene } = require('./shared-scene');
 const { normalizeCharacter, personalityFor } = require('./language-profile');
 const { RunMemory } = require('./run-memory');
+const { evaluateCardAlerts, evaluateShopAlerts } = require('../knowledge/archetype-key-components');
 
 function isLiveCombat(state) {
   // 存活敌人暂时为空不等于游戏已经结束这场战斗。
@@ -41,7 +42,10 @@ class DanmakuBridgeAdapter {
     this.cancelCommentary();
     this.memory.reset();
     this.director.invalidate();
+    this.director.presentedContentKeys?.clear();
     this.director.context = null;
+    this.keyOffer = null;
+    this.keyState = null;
     this.director.closed = false;
     this.sequence = -1;
     this.previous = null;
@@ -327,6 +331,7 @@ class DanmakuBridgeAdapter {
     this.sourceRunId = sourceRunId || this.sourceRunId;
     this.sequence = observation.sequence;
     const state = observation.state;
+    this.keyState = state;
     const previous = this.previous;
     const wasCombat = isLiveCombat(previous);
     const inCombat = isLiveCombat(state);
@@ -453,6 +458,109 @@ class DanmakuBridgeAdapter {
     const card = this.previous.player?.cards?.find(item => item.id === data.cardId);
     return this.ingestEvent({ name: 'card.played', eventId: fact.eventId,
       data: { cardId: data.cardId, cardName: card?.name || data.cardName } });
+  }
+
+  ensureKeyScope(runId, state) {
+    const revision = Number.isInteger(state?.timestamp) ? state.timestamp : (this.director.context?.stateRevision || 1);
+    if (!this.director.context || this.director.context.runId !== runId) {
+      const scope = { runId, sceneId: `${runId}:key-component`, stateRevision: revision };
+      this.scope = scope;
+      this.accepting = true;
+      this.director.closed = false;
+      this.director.setContext(scope);
+      return;
+    }
+    this.director.closed = false;
+    this.accepting = true;
+  }
+
+  cardOpportunityKey(event, state, runId) {
+    if (event.data?.opportunityId) return String(event.data.opportunityId);
+    const run = state?.run || {};
+    return `reward:${runId}:${run.act ?? ''}:${run.floor ?? ''}/${run.totalFloor ?? ''}:${run.currentCoord || run.coord || ''}:${run.room || ''}:${event.data?.signature || ''}`;
+  }
+
+  buildKeyAlerts(event, state, runId) {
+    const character = state?.run?.character;
+    const deck = state?.player?.cards || [];
+    const relics = state?.player?.relics || [];
+    const name = event?.name;
+    if (name === 'shop.opened' || name === 'shop.updated') {
+      const data = event.data || {};
+      const items = Array.isArray(data.items) ? data.items : [];
+      const gold = Number.isFinite(state?.player?.gold) ? state.player.gold : data.gold;
+      const visitId = data.visitId || 'visit';
+      const unseen = items.filter(item => {
+        const stockKey = item?.stockKey;
+        if (!stockKey) return true;
+        const identity = `key:${runId}:shop:${visitId}:object:${stockKey}`;
+        return !this.director.presentedContentKeys.has(identity);
+      });
+      const shop = evaluateShopAlerts({ character, deck, relics, gold, items: unseen });
+      if (!shop) return [];
+      const objectKey = shop.objectKeys.join('+');
+      return [{
+        channel: 'shop',
+        text: shop.text,
+        objectKeys: shop.alerts.map(alert => `key:${runId}:shop:${visitId}:object:${alert.offer.stockKey || `${alert.offer.kind}:${alert.offer.id}`}`),
+        contentKey: `key:${runId}:shop:${visitId}:${objectKey}`
+      }];
+    }
+    const cards = Array.isArray(event.data?.cards) ? event.data.cards : [];
+    if (!cards.length) return [];
+    if (name !== 'card.reward.opened' && name !== 'event.opened') return [];
+    const opportunityKey = this.cardOpportunityKey(event, state, runId);
+    return evaluateCardAlerts({ character, deck, relics, cards }).map(alert => ({
+      channel: 'reward',
+      text: alert.text,
+      objectKeys: [alert.objectKey],
+      contentKey: `key:${runId}:${opportunityKey}:${alert.objectKey}`
+    }));
+  }
+
+  syncKeyComponents(event, state, runId) {
+    if (!runId || !event?.name) return { accepted: false, reason: 'invalid_event' };
+    if (state) this.keyState = state;
+    this.keyRunId = runId;
+    if (['card.reward.closed', 'card.reward.selected', 'shop.closed', 'event.closed', 'map.opened'].includes(event.name)) {
+      this.keyOffer = null;
+      this.director.dropKeyComponents(item => (
+        event.name === 'map.opened'
+        || event.name === 'event.closed'
+        || (event.name.startsWith('shop') && item.channel === 'shop')
+        || (event.name.startsWith('card') && item.channel === 'reward')
+      ));
+      return { accepted: true, reason: 'dropped' };
+    }
+    const screen = event.name === 'card.reward.opened'
+      || event.name === 'shop.opened'
+      || event.name === 'shop.updated'
+      || (event.name === 'event.opened' && Array.isArray(event.data?.cards) && event.data.cards.length > 0);
+    if (!screen) return { accepted: false, reason: 'not_key_screen' };
+    const liveState = state || this.keyState;
+    if (!liveState) return { accepted: false, reason: 'missing_state' };
+    this.ensureKeyScope(runId, liveState);
+    this.keyOffer = { name: event.name, data: event.data };
+    const alerts = this.buildKeyAlerts(event, liveState, runId);
+    const keys = new Set(alerts.map(item => item.contentKey));
+    const channel = event.name.startsWith('shop') ? 'shop' : 'reward';
+    this.director.dropKeyComponents(item => item.channel === channel && !keys.has(item.contentKey));
+    const queued = [];
+    for (const alert of alerts) {
+      const result = this.director.upsertKeyComponent({
+        ...alert,
+        reconfirm: () => {
+          if (!this.keyOffer || !this.keyState) return false;
+          return this.buildKeyAlerts(
+            { name: this.keyOffer.name, data: this.keyOffer.data },
+            this.keyState,
+            this.keyRunId
+          ).some(item => item.contentKey === alert.contentKey);
+        }
+      });
+      if (result.accepted) queued.push(result);
+    }
+    return { accepted: queued.length > 0, count: queued.length, reason: 'key_component' };
   }
 
   async ingestEvent(event) {

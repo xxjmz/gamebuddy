@@ -68,6 +68,13 @@ function draftArchetypes(card) {
       completedAxes: [...impact.completedAxes]
     };
     if (typeof impact.started === 'boolean') entry.started = impact.started;
+    if (Number.isInteger(impact.readiness)) entry.readiness = impact.readiness;
+    if (typeof impact.status === 'string') entry.status = impact.status;
+    if (typeof impact.beforeStatus === 'string') entry.beforeStatus = impact.beforeStatus;
+    if (typeof impact.afterStatus === 'string') entry.afterStatus = impact.afterStatus;
+    for (const field of ['presentFunctions', 'missingFunctions', 'completedFunctions']) {
+      if (Array.isArray(impact[field])) entry[field] = impact[field].map(item => ({ ...item }));
+    }
     return entry;
   });
   return archetypes.includes(null) ? null : archetypes;
