@@ -229,6 +229,10 @@ function validateDraftImpactMessage(message) {
       if (archetype.reason !== undefined && typeof archetype.reason !== 'string') {
         return { ok: false, reason: 'archetype reason must be a string' };
       }
+      if (archetype.beforeScore !== undefined
+        && (!Number.isInteger(archetype.beforeScore) || archetype.beforeScore < 0 || archetype.beforeScore > 100)) {
+        return { ok: false, reason: 'archetype beforeScore must be an integer from 0 to 100' };
+      }
     }
     if (impact.deltaPoints !== impact.archetypes[0].deltaPoints) {
       return { ok: false, reason: 'legacy deltaPoints must match auto_strike' };

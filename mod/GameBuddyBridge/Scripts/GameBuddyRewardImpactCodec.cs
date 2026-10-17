@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace GameBuddyBridge.Scripts;
 
-internal sealed record DraftArchetypeImpact(string Id, int DeltaPoints, string? Reason);
+internal sealed record DraftArchetypeImpact(string Id, int DeltaPoints, string? Reason, int? BeforeScore = null);
 internal sealed record DraftCardImpact(
     string CardId,
     int DeltaPoints,
@@ -59,6 +59,8 @@ internal static class GameBuddyRewardImpactCodec
         if (index < 0) throw new ArgumentOutOfRangeException(nameof(impact), "Unknown archetype ID.");
         var name = (useChinese ? ChineseNames : EnglishNames)[index];
         var sign = impact.DeltaPoints > 0 ? "+" : string.Empty;
+        if (impact.BeforeScore is int before)
+            return $"{name} {before}% {sign}{impact.DeltaPoints}";
         return $"{name} {sign}{impact.DeltaPoints}%";
     }
 
@@ -94,7 +96,13 @@ internal static class GameBuddyRewardImpactCodec
                 if (reasonElement.ValueKind != JsonValueKind.String) return false;
                 reason = reasonElement.GetString();
             }
-            if (!byId.TryAdd(id, new DraftArchetypeImpact(id, archetypeDelta, reason))) return false;
+            int? beforeScore = null;
+            if (archetypeElement.TryGetProperty("beforeScore", out var beforeElement))
+            {
+                if (!beforeElement.TryGetInt32(out var before) || before is < 0 or > 100) return false;
+                beforeScore = before;
+            }
+            if (!byId.TryAdd(id, new DraftArchetypeImpact(id, archetypeDelta, reason, beforeScore))) return false;
         }
 
         var ordered = ArchetypeIds.Select(id => byId[id]).ToArray();

@@ -105,16 +105,20 @@ internal static class GameBuddyRewardOverlay
             };
             frame.AddThemeStyleboxOverride("panel", new StyleBoxFlat
             {
-                BgColor = new Color(0.15f, 0.09f, 0.06f, 0.94f),
-                BorderColor = new Color(0.95f, 0.64f, 0.25f),
-                BorderWidthLeft = 4,
-                BorderWidthTop = 1,
+                BgColor = new Color(0.141f, 0.110f, 0.086f, 0.94f),
+                BorderColor = new Color(0.431f, 0.294f, 0.165f),
+                BorderWidthLeft = 1,
+                BorderWidthTop = 2,
                 BorderWidthRight = 1,
                 BorderWidthBottom = 1,
-                CornerRadiusTopLeft = 5,
-                CornerRadiusTopRight = 5,
-                CornerRadiusBottomLeft = 5,
-                CornerRadiusBottomRight = 5
+                CornerRadiusTopLeft = 2,
+                CornerRadiusTopRight = 2,
+                CornerRadiusBottomLeft = 2,
+                CornerRadiusBottomRight = 2,
+                ContentMarginLeft = 8,
+                ContentMarginRight = 8,
+                ContentMarginTop = 6,
+                ContentMarginBottom = 6
             });
             var rows = new VBoxContainer
             {
@@ -160,15 +164,15 @@ internal static class GameBuddyRewardOverlay
             MouseFilter = Control.MouseFilterEnum.Ignore,
             FocusMode = Control.FocusModeEnum.None
         };
-        label.AddThemeFontSizeOverride("font_size", 17);
+        label.AddThemeFontSizeOverride("font_size", 16);
         label.AddThemeColorOverride("font_color", impact.DeltaPoints switch
         {
-            > 0 => new Color(0.49f, 0.94f, 0.65f),
-            < 0 => new Color(0.96f, 0.35f, 0.35f),
-            _ => new Color(0.68f, 0.68f, 0.68f)
+            > 0 => new Color(0.878f, 0.631f, 0.353f),
+            < 0 => new Color(0.769f, 0.518f, 0.455f),
+            _ => new Color(0.553f, 0.510f, 0.463f)
         });
-        label.AddThemeColorOverride("font_outline_color", Colors.Black);
-        label.AddThemeConstantOverride("outline_size", 4);
+        label.AddThemeColorOverride("font_outline_color", new Color(0.08f, 0.06f, 0.04f));
+        label.AddThemeConstantOverride("outline_size", 1);
         return label;
     }
 

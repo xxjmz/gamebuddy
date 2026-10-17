@@ -11,3 +11,7 @@
 ## 3. 验证
 
 - [x] 3.1 运行 `npm run test:syntax` 与 `node --test agent/tests/ironclad-archetypes.test.js agent/tests/auto-strike.test.js agent/tests/archetype-ui.test.js`，并打开选牌界面确认流派框为静态铜铁面板、候选同时显示当前百分比和变化。
+
+## 4. 游戏内流派框
+
+- [x] 4.1 把 `beforeScore` 放进 `draft_impact`，游戏内四行改为「名称 当前% 变化」，面板改成铜铁边。运行 `node --test agent/tests/auto-strike.test.js` 与 `dotnet run --project mod/GameBuddyBridge.Tests`，并把新的 `gamebuddy_bridge.dll` 装进本地游戏。

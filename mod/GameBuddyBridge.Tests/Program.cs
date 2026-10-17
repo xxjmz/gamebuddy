@@ -6,12 +6,17 @@ static void Assert(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
-static Dictionary<string, object?> Archetype(string id, object delta) => new()
+static Dictionary<string, object?> Archetype(string id, object delta, int? beforeScore = null)
 {
-    ["id"] = id,
-    ["deltaPoints"] = delta,
-    ["reason"] = $"{id}-reason"
-};
+    var archetype = new Dictionary<string, object?>
+    {
+        ["id"] = id,
+        ["deltaPoints"] = delta,
+        ["reason"] = $"{id}-reason"
+    };
+    if (beforeScore is int score) archetype["beforeScore"] = score;
+    return archetype;
+}
 
 static Dictionary<string, object?> Card(
     string cardId,
@@ -84,5 +89,14 @@ Assert(GameBuddyRewardImpactCodec.FormatLine(new("exhaust", -2, null), false) ==
     "English negative formatting is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatLine(new("block", 0, null), true) == "格挡壁垒 0%",
     "Zero formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("auto_strike", 8, null, 9), true) == "自动打击 9% +8",
+    "Current percentage formatting is incorrect.");
+Assert(GameBuddyRewardImpactCodec.FormatLine(new("strength", -2, null, 18), true) == "力量叠加 18% -2",
+    "Negative current percentage formatting is incorrect.");
+var withScore = ValidArchetypes();
+withScore[0] = Archetype("auto_strike", 8, 9);
+Assert(GameBuddyRewardImpactCodec.TryParse(Message(Card("ANGER", 8, withScore)), out var scored)
+    && scored!.Impacts["ANGER"].Archetypes[0].BeforeScore == 9,
+    "beforeScore was not retained.");
 
 Console.WriteLine("GameBuddy reward impact codec tests passed.");

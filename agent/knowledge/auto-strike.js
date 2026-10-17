@@ -50,11 +50,15 @@ function draftArchetypes(card) {
     const impact = byId.get(id);
     if (!impact || !Number.isInteger(impact.deltaPoints)
       || impact.deltaPoints < -100 || impact.deltaPoints > 100) return null;
-    return {
+    const entry = {
       id,
       deltaPoints: impact.deltaPoints,
       reason: typeof impact.reason === 'string' && impact.reason ? impact.reason : undefined
     };
+    if (Number.isInteger(impact.beforeScore) && impact.beforeScore >= 0 && impact.beforeScore <= 100) {
+      entry.beforeScore = impact.beforeScore;
+    }
+    return entry;
   });
   return archetypes.includes(null) ? null : archetypes;
 }

@@ -113,7 +113,9 @@ test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
   assert.ok(message.impacts.every(impact => (
     impact.archetypes.length === 4
       && impact.archetypes.every(item => Number.isInteger(item.deltaPoints)
-        && item.deltaPoints >= -100 && item.deltaPoints <= 100)
+        && item.deltaPoints >= -100 && item.deltaPoints <= 100
+        && Number.isInteger(item.beforeScore)
+        && item.beforeScore >= 0 && item.beforeScore <= 100)
   )));
   assert.deepEqual(message.impacts[0].archetypes.map(impact => impact.id), DRAFT_ARCHETYPE_IDS);
   assert.equal(draftImpactMessage(event, 'silent', decorated), null);
