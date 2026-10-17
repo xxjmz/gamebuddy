@@ -11,6 +11,10 @@
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardCandidateSelector.cs" Link="GameBuddyRewardCandidateSelector.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardSelectionTracker.cs" Link="GameBuddyRewardSelectionTracker.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddySaveLoadLog.cs" Link="GameBuddySaveLoadLog.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyFactQueue.cs" Link="GameBuddyFactQueue.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyFactEmitter.cs" Link="GameBuddyFactEmitter.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyHookCapabilityRegistry.cs" Link="GameBuddyHookCapabilityRegistry.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRunIdentityStore.cs" Link="GameBuddyRunIdentityStore.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 </Project>

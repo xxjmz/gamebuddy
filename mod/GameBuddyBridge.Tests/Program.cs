@@ -208,3 +208,106 @@ Assert(!GameBuddySaveLoadLog.Record(Path.Combine(blocker, "child"), firstLoad),
     "Unwritable save-load directory was reported as saved.");
 
 Console.WriteLine("GameBuddy save-load log tests passed.");
+
+var factQueue = new GameBuddyFactQueue(3);
+Assert(factQueue.Enqueue(1, "one") is null, "Fact queue dropped an item before reaching capacity.");
+factQueue.Enqueue(2, "two");
+factQueue.Enqueue(3, "three");
+var overflow = factQueue.Enqueue(4, "four");
+Assert(overflow == new GameBuddyFactGap(1, 1), "Fact queue did not report its exact overflow gap.");
+Assert(factQueue.Snapshot().Select(item => item.SourceSeq).SequenceEqual([2L, 3L, 4L]),
+    "Fact queue did not retain the newest ordered facts.");
+factQueue.Acknowledge(2);
+Assert(factQueue.Snapshot().Select(item => item.SourceSeq).SequenceEqual([3L, 4L]),
+    "Fact acknowledgement removed the wrong source sequence.");
+factQueue.Acknowledge(99);
+Assert(factQueue.Snapshot().Count == 0, "Fact acknowledgement did not clear the durable prefix.");
+
+var reconnect = new GameBuddyFactQueue(10);
+reconnect.Enqueue(1, "one");
+reconnect.Enqueue(2, "two");
+reconnect.Enqueue(3, "three");
+reconnect.Acknowledge(1);
+Assert(reconnect.Snapshot().Select(item => item.SourceSeq).SequenceEqual([2L, 3L]),
+    "Acknowledging a prefix must leave later facts in source order for resend.");
+
+var overflowQueue = new GameBuddyFactQueue(1);
+Assert(overflowQueue.Enqueue(1, "one") is null, "The first queued fact was dropped.");
+var dropped = overflowQueue.Enqueue(2, "two");
+Assert(dropped == new GameBuddyFactGap(1, 1), "Overflow did not report the dropped sequence.");
+Assert(overflowQueue.Count == overflowQueue.Capacity, "Overflow left free space instead of staying full.");
+overflowQueue.DeclareGap(3, "gap-1");
+Assert(overflowQueue.Count == overflowQueue.Capacity, "Declaring a gap waited for a free queue slot.");
+Assert(overflowQueue.Snapshot().Select(item => item.SourceSeq).SequenceEqual([2L, 3L]),
+    "A full queue did not retain the overflow gap in source order.");
+var widenedDrop = overflowQueue.Enqueue(4, "four");
+Assert(widenedDrop == new GameBuddyFactGap(2, 2), "The second overflow did not report the newly dropped sequence.");
+overflowQueue.DeclareGap(3, "gap-1-2");
+Assert(overflowQueue.Snapshot().Select(item => item.Json).SequenceEqual(["gap-1-2", "four"]),
+    "An unacknowledged gap declaration was not updated while the queue stayed full.");
+overflowQueue.Acknowledge(3);
+Assert(overflowQueue.Snapshot().Select(item => item.SourceSeq).SequenceEqual([4L]),
+    "Acknowledging the gap prefix removed a later fact.");
+overflowQueue.Acknowledge(4);
+Assert(overflowQueue.Snapshot().Count == 0, "The retained fact remained after it was acknowledged.");
+
+Console.WriteLine("GameBuddy fact queue tests passed.");
+
+static long FactSourceSeq(string json)
+{
+    using var document = JsonDocument.Parse(json);
+    return document.RootElement.GetProperty("data").GetProperty("sourceSeq").GetInt64();
+}
+
+var emitted = new List<string>();
+GameBuddyFactEmitter.ResetForTests(10, emitted.Add, "session-a");
+GameBuddyFactEmitter.Publish("room.entered", new { roomId = 1 });
+GameBuddyFactEmitter.Publish("map.observed", new { roomId = 2 });
+GameBuddyFactEmitter.Publish("room.exited", new { roomId = 3 });
+GameBuddyFactEmitter.Acknowledge("other-session", 3);
+Assert(GameBuddyFactEmitter.PendingJson().Count == 3, "Another source session cleared this session's resend queue.");
+GameBuddyFactEmitter.Acknowledge("session-a", 1);
+var resend = GameBuddyFactEmitter.PendingJson();
+Assert(resend.Select(FactSourceSeq).SequenceEqual([2L, 3L]),
+    "After a short disconnect the unacked suffix was not retained in source order.");
+
+GameBuddyFactEmitter.ResetForTests(1, emitted.Add, "session-overflow");
+GameBuddyFactEmitter.Publish("room.entered", new { roomId = 1 });
+GameBuddyFactEmitter.Publish("room.exited", new { roomId = 2 });
+var overflowPending = GameBuddyFactEmitter.PendingJson();
+Assert(overflowPending.Select(FactSourceSeq).SequenceEqual([2L, 3L]),
+    "Queue overflow did not declare its gap while the queue was still full.");
+using (var gapDocument = JsonDocument.Parse(overflowPending[1]))
+{
+    var gap = gapDocument.RootElement.GetProperty("data");
+    Assert(gap.GetProperty("eventType").GetString() == "capture.gap_detected", "Overflow did not emit capture.gap_detected.");
+    Assert(gap.GetProperty("payload").GetProperty("reason").GetString() == "queue_overflow", "Overflow gap reason was not queue_overflow.");
+    Assert(gap.GetProperty("payload").GetProperty("fromSourceSeq").GetInt64() == 1
+        && gap.GetProperty("payload").GetProperty("toSourceSeq").GetInt64() == 1,
+        "Overflow gap did not name the dropped sequence.");
+}
+GameBuddyFactEmitter.Publish("map.observed", new { roomId = 3 });
+var widenedPending = GameBuddyFactEmitter.PendingJson();
+using (var widenedDocument = JsonDocument.Parse(widenedPending.Single(item => FactSourceSeq(item) == 3)))
+{
+    var widened = widenedDocument.RootElement.GetProperty("data").GetProperty("payload");
+    Assert(widened.GetProperty("fromSourceSeq").GetInt64() == 1 && widened.GetProperty("toSourceSeq").GetInt64() == 2,
+        "A later overflow did not widen the unacknowledged gap.");
+}
+Assert(widenedPending.Select(FactSourceSeq).SequenceEqual([3L, 4L]),
+    "The widened gap and the retained fact were not in source order.");
+
+GameBuddyFactEmitter.ResetForTests(10, emitted.Add, "session-b");
+GameBuddyFactEmitter.Publish("room.entered", new { roomId = 9 });
+var restartedPending = GameBuddyFactEmitter.PendingJson();
+Assert(restartedPending.Count == 1, "A new source session kept facts from the previous session.");
+using (var restartedDocument = JsonDocument.Parse(restartedPending[0]))
+{
+    var restartedFact = restartedDocument.RootElement.GetProperty("data");
+    Assert(restartedFact.GetProperty("sourceSessionId").GetString() == "session-b"
+        && restartedFact.GetProperty("sourceSeq").GetInt64() == 1
+        && restartedFact.GetProperty("eventId").GetString() == "session-b:1",
+        "A restarted source session did not start again at sequence 1.");
+}
+
+Console.WriteLine("GameBuddy fact emitter resend tests passed.");
