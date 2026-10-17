@@ -18,6 +18,15 @@ public static class GameBuddySaveLoadLog
 
     public static bool RecordObserved() => Record(_directory, null);
 
+    public static int ObservedCount()
+    {
+        lock (Gate)
+        {
+            if (string.IsNullOrWhiteSpace(_directory)) return 0;
+            return ReadLoads(Path.Combine(_directory, FileName)).Count;
+        }
+    }
+
     public static bool Record(string directory, DateTimeOffset? observedAt)
     {
         try

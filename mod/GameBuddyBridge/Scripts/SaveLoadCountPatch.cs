@@ -7,6 +7,7 @@ public static class SaveLoadCountPatch
     public static void Postfix()
     {
         GameBuddySaveLoadLog.RecordObserved();
+        GameBuddyFactEmitter.ObserveReload(GameBuddySaveLoadLog.ObservedCount());
     }
 
     public static void Apply(Harmony harmony, string modDirectory)

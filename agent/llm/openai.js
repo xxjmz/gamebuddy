@@ -177,10 +177,13 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
   let requestSequence = 0;
   const waitMs = Number.isFinite(timeoutMs) ? timeoutMs : 120000;
 
-  async function request(url, body) {
+  async function request(url, body, { signal } = {}) {
     if (typeof fetchImpl !== 'function') throw new Error('fetch is not available');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), waitMs);
+    const cancel = () => controller.abort();
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, { once: true });
     try {
       const response = await fetchImpl(url, {
         method: 'POST',
@@ -197,9 +200,10 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
         error.status = response.status;
         throw error;
       }
-      return body.stream === true ? readSseText(response) : response.json();
+      return await (body.stream === true ? readSseText(response) : response.json());
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
     }
   }
 
@@ -228,7 +232,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
     }
   }
 
-  async function completeJson(system, payload, task, raw = false) {
+  async function completeJson(system, payload, task, raw = false, options = {}) {
     if (!enabled) return null;
     const detail = { task, model: config.model, requestId: `${task}-${++requestSequence}` };
     const started = Date.now();
@@ -250,7 +254,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
         try {
           return await request(
             `${config.baseURL}/chat/completions`,
-            chatCompletionsBody(config, system, user, temperature)
+            chatCompletionsBody(config, system, user, temperature), options
           );
         } catch (error) {
           const allowed = parseAllowedTemperature(error.message);
@@ -258,7 +262,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
             emitLog(detail.requestId, task, 'note', `temperature 不被接受，改用 ${allowed}`);
             return request(
               `${config.baseURL}/chat/completions`,
-              chatCompletionsBody(config, system, user, allowed)
+              chatCompletionsBody(config, system, user, allowed), options
             );
           }
           throw error;
@@ -273,7 +277,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
         };
         if (config.reasoningEffort) requestBody.reasoning = { effort: config.reasoningEffort };
         try {
-          body = await request(`${config.baseURL}/responses`, requestBody);
+          body = await request(`${config.baseURL}/responses`, requestBody, options);
         } catch (error) {
           if (error.status !== 404 && error.status !== 405) throw error;
           emitLog(detail.requestId, task, 'note', 'Responses 不可用，改走 Chat Completions');
@@ -330,11 +334,12 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
       payload,
       'card_reward'
     ),
-    completeDanmaku: payload => completeJson(
-      '你是《杀戮尖塔 2》的战场观战弹幕文案器，只负责说一句角色感想，不负责决策。默认口吻是铁甲战士：铁血、直接、沉着，像久经战场的战士，允许一点克制的冷幽默。句子要像自然说话，不要像技能标签。只输出 JSON：{"phrases":["台词"]}，生成 1 到 2 句，每句 6 到 48 个中文字符。\n\n写作要求：facts 是唯一可提及的游戏事实；style 和 examples 只用于把握口吻，不能照抄 examples。只输出台词本身，不要在句首加攻击、技能名、类别、形容词标签，不要使用冒号。普通攻击可以说“这一拳没有私人恩怨。”这种自然短句。\n\n禁止：出牌、目标、操作建议；捏造伤害数字、胜负结果、卡牌、敌人或机制；称呼“玩家”；解释、推理过程、Markdown、广告、辱骂和链接。若事实不足，就写不带新事实的战场感想。',
+    completeDanmaku: (payload, options) => completeJson(
+      '你是《杀戮尖塔 2》的角色观战弹幕文案器，只表达感想，不负责决策。严格采用 characterName、style、tone、examples 指定的角色人格，不能默认使用铁甲战士口吻。只输出 JSON：{"phrases":[{"text":"第一句","enemyKeys":[],"momentId":null},{"text":"第二句","enemyKeys":[],"momentId":null}]}。enemyKeys 填这句针对的当前怪物 key，不涉及怪物可空；回顾 moments 中的已发生事件时填对应 momentId，不得发明标识。生成 2 句互不重复、各 6 到 48 个中文字符的自然短句，两句各有不同观察角度。\n\n事实规则：snapshot 和 facts 是请求发起时的 Mod 快照，recentEvents 是此前真实发生的 Mod 消息，ageMs 表示距采样时间的间隔。它们是唯一游戏事实，台词可能稍晚展示，因此以对刚才局面的观察或感想表达，不宣称某个旧行动此刻仍未执行。不把意图说成已经命中，不猜伤害、胜负、机制或未提供的伙伴动作。优先围绕具体怪物名称、已知行动或近期出牌等事件写有针对性的句子；事实不足时允许不带新事实的角色感想。\n\n主题规则：moments 是已验证的精彩时刻，优先围绕其中最高优先级的一件事写，不被普通闲聊淹没；runMemories 是本局已确认的回忆，可自然联系当前遭遇，不重复背诵，不指认未知伤害来源。attention 是当前人格的观察重点，reactions 指导不同精彩时刻的反应，memoryVoice 指导回忆方式。mode 为 quiet 时保持克制，不制造不存在的新变化。\n\n口吻规则：style 和 examples 只帮助把握语感，不能照抄示例。两句保持同一角色人格但不要同一个句式或笑点。recentTexts 中近期句子不得原句重复、换词复述或重复笑点。使用尖塔式克制、怪诞、冷幽默，避免现代网络热梗、客服腔、说教和过度卖萌。若确实无新内容可说，可少于两句或空数组，不要硬编。\n\n禁止出牌、目标或操作建议，禁止称呼“玩家”，不输出解释、推理、Markdown、广告、辱骂或链接。不加角色名、技能名等冒号前缀，只输出角色台词。',
       payload,
       'danmaku',
-      true
+      true,
+      options
     )
   };
 }

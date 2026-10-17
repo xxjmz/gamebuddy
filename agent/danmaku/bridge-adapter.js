@@ -6,10 +6,12 @@ const { nextActionFact } = require('./codex-facts');
 const { buildRecommendationDialogue } = require('./recommendation-dialogue');
 const { createMonsterDisplayName } = require('./monster-identity');
 const { buildSharedScene } = require('./shared-scene');
+const { normalizeCharacter, personalityFor } = require('./language-profile');
+const { RunMemory } = require('./run-memory');
 
 function isLiveCombat(state) {
-  return Boolean(state?.combat)
-    && (state.combat.enemies || []).some(enemy => enemy?.name && enemy.alive !== false);
+  // 存活敌人暂时为空不等于游戏已经结束这场战斗。
+  return Boolean(state?.combat);
 }
 
 class DanmakuBridgeAdapter {
@@ -19,6 +21,7 @@ class DanmakuBridgeAdapter {
     idleMs = 20_000,
     sharedClient = null,
     llmAtmosphere = null,
+    aiIntervalMs = 15_000,
     ...directorOptions
   } = {}) {
     this.now = now;
@@ -26,11 +29,17 @@ class DanmakuBridgeAdapter {
     this.idleMs = idleMs;
     this.sharedClient = sharedClient;
     this.llmAtmosphere = llmAtmosphere;
+    this.aiIntervalMs = aiIntervalMs;
+    this.aiRequests = new Set();
+    this.aiBatch = 0;
+    this.memory = new RunMemory({ now });
     this.director = new DanmakuDirector({ now, ...directorOptions });
     this.reset();
   }
 
   reset() {
+    this.cancelCommentary();
+    this.memory.reset();
     this.director.invalidate();
     this.director.context = null;
     this.director.closed = false;
@@ -38,6 +47,7 @@ class DanmakuBridgeAdapter {
     this.previous = null;
     this.scope = null;
     this.runId = null;
+    this.sourceRunId = null;
     this.serial = 0;
     this.sceneCount = (this.sceneCount || 0) + 1;
     this.accepting = false;
@@ -49,6 +59,8 @@ class DanmakuBridgeAdapter {
   }
 
   invalidate() {
+    this.cancelCommentary();
+    this.memory.disconnect();
     this.accepting = false;
     this.director.invalidate();
   }
@@ -139,6 +151,10 @@ class DanmakuBridgeAdapter {
   }
 
   async enterDeath(state, { runId, revision, eventId } = {}) {
+    if (this.sharedScene?.phase === 'death' && this.scope?.runId === runId) {
+      return { accepted: false, reason: 'death_already_entered' };
+    }
+    this.cancelCommentary();
     const scope = { runId, sceneId: `${runId}:death-${++this.sceneCount}`, stateRevision: revision };
     this.scope = scope;
     this.previous = structuredClone(state || {});
@@ -159,7 +175,7 @@ class DanmakuBridgeAdapter {
   }
 
   enemyKey(enemy, index = 0) {
-    return `${enemy?.id || enemy?.name || 'enemy'}#${index}`;
+    return enemy?.key || `${enemy?.name || enemy?.id || 'enemy'}#${index}`;
   }
 
   actionSignature(enemy, index = 0) {
@@ -171,55 +187,125 @@ class DanmakuBridgeAdapter {
     return [enemy.id || enemy.name, fact?.moveKey || '', fact?.kind || enemy.intent || ''].join('|');
   }
 
-  async emit(trigger, extras = {}) {
+  cancelCommentary() {
+    for (const controller of this.aiRequests) controller.abort();
+    this.aiRequests.clear();
+    this.nextAiAt = Infinity;
+    this.lastContextSignature = '';
+    this.modEventSerial = 0;
+    this.lastQuietAcceptedAt = -Infinity;
+    this.recentEvents = [];
+    this.eventIds = new Set();
+  }
+
+  rememberEvent(event) {
+    if (event.eventId && this.eventIds.has(event.eventId)) return;
+    const trigger = { 'card.played': 'card_played', 'enemy.spawned': 'mechanic',
+      'enemy.revived': 'mechanic', 'enemy.phase_changed': 'mechanic' }[event.name];
+    const context = extractSceneContext({ state: this.previous || {}, trigger, event });
+    const lines = factLines(context, { event });
+    if (event.name === 'turn.started' && Number.isInteger(event.data?.turn)) lines.push(`第 ${event.data.turn} 回合开始。`);
+    if (!lines.length) return;
+    if (event.eventId) this.eventIds.add(event.eventId);
+    while (this.eventIds.size > 512) this.eventIds.delete(this.eventIds.values().next().value);
+    this.modEventSerial += 1;
+    this.recentEvents.push({ at: this.now(), name: event.name, facts: lines });
+    this.recentEvents = this.recentEvents.filter(item => this.now() - item.at <= 45_000).slice(-12);
+  }
+
+  maybeGenerateCommentary() {
+    if (!this.llmAtmosphere || !this.accepting || this.director.closed || !this.scope
+      || this.sharedScene?.phase !== 'combat' || !isLiveCombat(this.previous)
+      || this.now() < this.nextAiAt) return;
+    this.nextAiAt = this.now() + this.aiIntervalMs;
     const scope = { ...this.scope };
-    const sceneContext = extractSceneContext({ state: this.previous || {}, trigger, event: extras.event });
-    const factTexts = extras.factTexts || factLines(sceneContext, { event: extras.event });
-    const result = this.director.burst({
-      ...scope,
-      eventId: extras.eventId || `derived-${++this.serial}`,
-      trigger,
-      factTexts,
-      ...extras
+    const generation = this.director.generation;
+    const context = extractSceneContext({ state: this.previous, trigger: 'periodic' });
+    const controller = new AbortController();
+    this.aiRequests.add(controller);
+    const batchId = `${scope.sceneId}:ai-${++this.aiBatch}`;
+    const current = () => !controller.signal.aborted && this.accepting && !this.director.closed
+      && this.sharedScene?.phase === 'combat' && this.director.generation === generation
+      && this.scope?.sceneId === scope.sceneId && this.scope?.runId === scope.runId
+      && normalizeCharacter(this.previous?.run?.character) === context.characterKey;
+    this.recentEvents = this.recentEvents.filter(item => this.now() - item.at <= 45_000).slice(-12);
+    const recentEvents = this.recentEvents.map(({ at, ...item }) => ({ ...item, ageMs: this.now() - at }));
+    const facts = context.enemies.map(enemy => {
+      const action = enemy.nextMoveName || categoryLabel(enemy.intent);
+      return action ? `${enemy.name}在采样时显示行动：${action}` : `采样时场上有${enemy.name}`;
     });
-    if (result.accepted && trigger !== 'entry' && this.llmAtmosphere && !extras.disableAI) {
-      const facts = [];
-      for (const enemy of sceneContext.enemies || []) {
-        const action = enemy.nextMoveName || enemy.intent;
-        if (action) facts.push(`${enemy.name}正在${action}`);
-      }
-      if (extras.recommendation?.primary) {
-        const primary = extras.recommendation.primary;
-        facts.push(`建议内容：${primary.cardName || primary.displayLabel || primary.label || primary.action || ''}`);
-      }
-      if (!facts.length) facts.push(...(extras.factTexts || []).slice(0, 2));
-      const eventId = extras.eventId || `derived-${this.serial}`;
-      void this.llmAtmosphere.generate({
-        character: sceneContext.characterKey || 'ironclad',
-        trigger,
-        facts: [...new Set(facts)].filter(Boolean)
-      }).then(phrases => {
-        if (!phrases.length || this.scope?.sceneId !== scope.sceneId || this.director.closed) return;
-        this.director.burst({
-          ...scope,
-          eventId: `${eventId}-ai`,
-          trigger: 'ai_atmosphere',
-          key: `${eventId}-ai`,
-          priority: 3,
-          factTexts: phrases,
-          detailByText: Object.fromEntries(phrases.map(text => [text, {
-            title: '铁甲战士的战场感想',
-            lines: ['根据当前 Mod 场景生成'],
-            source: 'ai'
-          }])),
-          factSourceByText: Object.fromEntries(phrases.map(text => [text, {
-            type: 'ai_generated',
-            source: 'ai'
-          }]))
-        });
-      }).catch(error => console.warn('[GameBuddy Danmaku] AI line skipped:', error.message));
-    }
-    return result;
+    const snapshot = {
+      turn: context.turn,
+      player: { hp: context.playerHp, maxHp: context.playerMaxHp, block: context.block, energy: context.energy },
+      enemies: context.enemies
+    };
+    const moments = this.memory.pending();
+    const runMemories = this.memory.relevant(this.previous);
+    const signature = JSON.stringify([snapshot, this.modEventSerial, runMemories]);
+    const mode = moments.length ? 'highlight' : signature === this.lastContextSignature ? 'quiet' : 'observation';
+    this.lastContextSignature = signature;
+    const momentSerial = this.memory.serial;
+    this.memory.claim(moments);
+    void Promise.resolve().then(() => {
+      if (!current()) return { status: 'cancelled', phrases: [] };
+      return this.llmAtmosphere.generate({
+        character: context.characterKey, trigger: 'periodic', batchId, snapshot, facts, recentEvents,
+        moments: moments.map(({ id, kind, text, priority }) => ({ id, kind, text, priority })), runMemories, mode,
+        recentTexts: [...this.director.recent, ...this.director.queue.map(item => item.text)].slice(-20)
+      }, { signal: controller.signal });
+    }).then(result => {
+      if (!current() || result.status !== 'generated') return;
+      if (!moments.length && this.memory.serial > momentSerial) return;
+      if (mode === 'quiet' && this.now() - this.lastQuietAcceptedAt < 30_000) return;
+      const commentaryByText = {};
+      const phrases = (result.phrases || []).slice(0, mode === 'quiet' ? 1 : 2).filter(text => {
+        const meta = result.commentaryByText?.[text] || { enemyKeys: context.enemies.map(enemy => enemy.key), momentId: moments[0]?.id || null };
+        commentaryByText[text] = { ...meta, quiet: mode === 'quiet' };
+        return this.isRelevant({ source: 'ai', commentary: commentaryByText[text] });
+      });
+      if (!phrases.length) return;
+      if (mode === 'quiet') this.lastQuietAcceptedAt = this.now();
+      this.director.burst({
+        ...scope, eventId: batchId, trigger: 'ai_atmosphere', key: batchId,
+        priority: 3, factTexts: phrases, commentaryByText, speaker: personalityFor(context.characterKey).name,
+        detailByText: Object.fromEntries(phrases.map(text => [text, {
+          title: `${personalityFor(context.characterKey).name}的战场感想`,
+          lines: [...moments.map(item => item.text), ...facts, ...runMemories, ...recentEvents.flatMap(item => item.facts)].slice(0, 8), source: 'ai'
+        }])),
+        factSourceByText: Object.fromEntries(phrases.map(text => [text, { type: 'ai_generated', source: 'ai' }]))
+      });
+    }).catch(error => {
+      if (!controller.signal.aborted) console.warn('[GameBuddy Danmaku] AI line skipped:', error.message);
+    }).finally(() => this.aiRequests.delete(controller));
+  }
+
+  isRelevant(message) {
+    if (message.source !== 'ai' || !message.commentary) return true;
+    if (message.commentary.momentId) return this.memory.validMoment(message.commentary.momentId);
+    const alive = new Set(extractSceneContext({ state: this.previous || {} }).enemies.map(enemy => enemy.key));
+    return (message.commentary.enemyKeys || []).every(key => alive.has(key));
+  }
+
+  tick() {
+    if (this.memory.pending().length) this.director.queue = this.director.queue.filter(item => item.source !== 'ai' || item.commentary?.momentId);
+    this.maybeGenerateCommentary();
+    return this.director.tick(item => this.isRelevant(item));
+  }
+
+  emitSkill(enemy, index, fact) {
+    if (!fact) return { accepted: false, reason: 'no_skill' };
+    const key = `${this.enemyKey(enemy, index)}:${fact.moveKey}:${fact.kind}`;
+    return this.director.burst({
+      ...this.scope, eventId: `skill-${++this.serial}`, trigger: 'monster_skill',
+      key: `${key}:${this.serial}`, contentIdentity: key, priority: 3,
+      skillLabel: `${enemy.name}${(this.previous?.combat?.enemies || []).filter(item => item.name === enemy.name).length > 1 ? `（${(enemy.slot ?? index) + 1}）` : ''} · ${fact.detail.lines.find(line => line.startsWith('行动：'))?.slice(3) || '当前行动'}`,
+      factTexts: [fact.text], detailByText: { [fact.text]: fact.detail },
+      factSourceByText: { [fact.text]: { type: 'skill_dialogue', source: 'monster_skill' } }
+    });
+  }
+
+  async emit(trigger, extras = {}) {
+    return this.director.burst({ ...this.scope, eventId: extras.eventId || `derived-${++this.serial}`, trigger, ...extras });
   }
 
   async ingestObservation(observation, { runId } = {}) {
@@ -227,7 +313,8 @@ class DanmakuBridgeAdapter {
     if (observation?.schema !== 'gamebuddy.observation.v1' || !Number.isInteger(observation.sequence)) {
       throw new TypeError('无效 observation');
     }
-    if (this.runId !== runId) {
+    const sourceRunId = observation.state?.run?.runId || null;
+    if (this.runId !== runId || (sourceRunId && this.sourceRunId && sourceRunId !== this.sourceRunId)) {
       this.reset();
       this.runId = runId;
     }
@@ -237,6 +324,7 @@ class DanmakuBridgeAdapter {
     }
     if (observation.sequence <= this.sequence) return { accepted: false, reason: 'old_observation' };
     this.accepting = true;
+    this.sourceRunId = sourceRunId || this.sourceRunId;
     this.sequence = observation.sequence;
     const state = observation.state;
     const previous = this.previous;
@@ -244,9 +332,11 @@ class DanmakuBridgeAdapter {
     const inCombat = isLiveCombat(state);
 
     if (!inCombat) {
+      this.memory.observe(state, { runId });
       this.previous = structuredClone(state);
       this.fightKey = '';
       if (wasCombat && this.scope) {
+        this.cancelCommentary();
         const died = Number(state?.player?.hp) <= 0;
         if (died) {
           return this.enterDeath(previous, {
@@ -264,47 +354,41 @@ class DanmakuBridgeAdapter {
     }
 
     const sceneContext = extractSceneContext({ state });
-    const names = [...sceneContext.enemyNames].sort();
-    const fightKey = JSON.stringify([state.run?.act, state.run?.floor, names]);
-    const entering = fightKey !== this.fightKey;
+    const combatId = state.combat?.combatId || state.run?.combatId;
+    const fightKey = combatId
+      ? `combat:${combatId}`
+      : JSON.stringify([state.run?.act, state.run?.totalFloor ?? state.run?.floor, state.run?.currentCoord]);
+    const entering = fightKey !== this.fightKey
+      || normalizeCharacter(previous?.run?.character) !== sceneContext.characterKey;
     this.fightKey = fightKey;
     this.previous = structuredClone(state);
-    if (entering) this.sceneCount += 1;
+    if (entering) {
+      this.cancelCommentary();
+      this.sceneCount += 1;
+    }
     this.scope = { runId, sceneId: `${runId}:combat-${this.sceneCount}`, stateRevision: observation.sequence };
     this.director.setContext(this.scope);
+    this.memory.observe(state, { runId, sceneId: this.scope.sceneId, entering });
 
     if (entering) {
+      this.sceneStartedAt = this.now();
       this.sharedScene = buildSharedScene(state, 'combat');
       this.markFact();
       this.lastMoveKeys = new Map(sceneContext.enemies.map((enemy, index) => [
         this.enemyKey(enemy, index), this.actionSignature(enemy, index)
       ]));
-      const facts = [combatHeadline(sceneContext.enemies)];
-      const seen = new Set(facts.map(item => item.text));
       for (const [index, enemy] of sceneContext.enemies.entries()) {
-        const fact = nextActionFact(enemy, {
-          categoryLabel,
-          sceneId: this.scope.sceneId,
-          displayName: this.displayName(enemy, index),
-          occurrence: index
-        });
-        if (!fact || seen.has(fact.text)) continue;
-        seen.add(fact.text);
-        facts.push({ text: fact.text, detail: fact.detail });
+        this.emitSkill(enemy, index, nextActionFact(enemy, {
+          categoryLabel, sceneId: this.scope.sceneId, displayName: this.displayName(enemy, index), occurrence: index
+        }));
       }
-      const result = await this.emit('entry', {
-        eventId: `entry-${this.scope.sceneId}`,
-        key: 'entry',
-        factTexts: facts.map(item => item.text),
-        detailByText: Object.fromEntries(facts.map(item => [item.text, item.detail])),
-        factSourceByText: Object.fromEntries(facts.map(item => [item.text, {
-          type: 'fixed_dialogue',
-          source: 'original_template'
-        }]))
-      });
+      this.nextAiAt = this.now();
+      this.maybeGenerateCommentary();
       void this.enqueueShared({ state, phase: 'combat', scope: this.scope }).catch(() => {});
-      return result;
+      return { accepted: true, reason: 'combat_started' };
     }
+    // 断线恢复同一场景时重新启动周期，但不重播入场。
+    if (this.nextAiAt === Infinity && this.sharedScene?.phase === 'combat') this.nextAiAt = this.now();
 
     const changed = sceneContext.enemies
       .map((enemy, index) => ({
@@ -324,17 +408,8 @@ class DanmakuBridgeAdapter {
     }
     if (changed.length) {
       this.markFact();
-      return this.emit('enemy_move', {
-        eventId: `move-${this.scope.sceneId}-${sceneContext.turn ?? 'unknown'}-${++this.serial}`,
-        key: `${sceneContext.turn ?? 'x'}:${changed.map(item => item.key).join('|')}`,
-        priority: 3,
-        factTexts: changed.map(item => item.fact.text),
-        detailByText: Object.fromEntries(changed.map(item => [item.fact.text, item.fact.detail])),
-        factSourceByText: Object.fromEntries(changed.map(item => [item.fact.text, {
-          type: 'fixed_dialogue',
-          source: 'original_template'
-        }]))
-      });
+      for (const item of changed) this.emitSkill(item.enemy, item.index, item.fact);
+      return { accepted: true, reason: 'skills_updated' };
     }
 
     if (!this.idleEmitted && this.lastFactAt && this.now() - this.lastFactAt >= this.idleMs) {
@@ -368,11 +443,25 @@ class DanmakuBridgeAdapter {
     });
   }
 
+  async ingestFact(fact, { replay = false } = {}) {
+    // 存储已校验后的实时事实也可作为表达输入；拒绝回放/跨局/旧战斗事实。
+    if (replay || fact?.eventType !== 'card.played' || !this.accepting || this.director.closed
+      || this.sharedScene?.phase !== 'combat' || !fact.runId || fact.runId !== this.previous?.run?.runId
+      || !Number.isFinite(fact.occurredAt) || fact.occurredAt < this.sceneStartedAt - 2000
+      || this.now() - fact.occurredAt > 45_000 || fact.occurredAt > this.now() + 1000) return;
+    const data = fact.payload || {};
+    const card = this.previous.player?.cards?.find(item => item.id === data.cardId);
+    return this.ingestEvent({ name: 'card.played', eventId: fact.eventId,
+      data: { cardId: data.cardId, cardName: card?.name || data.cardName } });
+  }
+
   async ingestEvent(event) {
     if (!event?.name) return { accepted: false, reason: 'invalid_event' };
     const scope = this.scope || this.director.context;
     if (!scope || !sameContext(event.scope || scope, scope)) return { accepted: false, reason: 'stale_event' };
     if (event.name === 'combat.ended') {
+      this.cancelCommentary();
+      if (this.sharedScene?.phase === 'death') return { accepted: false, reason: 'death_already_entered' };
       if (Number(this.previous?.player?.hp) <= 0 && this.runId) {
         return this.enterDeath(this.previous, {
           runId: this.runId,
@@ -384,34 +473,12 @@ class DanmakuBridgeAdapter {
       return this.director.close({ ...scope, eventId: event.eventId || `event-${++this.serial}`, outcome: event.outcome || 'unknown' });
     }
     if (!this.accepting) return { accepted: false, reason: 'not_accepting' };
-    const triggerByEvent = {
-      'enemy.spawned': 'mechanic',
-      'enemy.revived': 'mechanic',
-      'enemy.phase_changed': 'mechanic',
-      'card.played': 'card_played'
-    };
-    const trigger = triggerByEvent[event.name];
-    if (!trigger) return { accepted: false, reason: 'unsupported_event' };
-    this.markFact();
-    return this.emit(trigger, {
-      eventId: event.eventId || `event-${++this.serial}`,
-      key: event.eventId,
-      event,
-      priority: 3,
-      factTexts: factLines(extractSceneContext({ state: this.previous || {}, trigger, event }), { event })
-    });
+    if (this.director.closed || this.sharedScene?.phase !== 'combat') return { accepted: false, reason: 'not_in_combat' };
+    this.memory.event(event, this.previous);
+    this.memory.observe(this.previous, { runId: this.runId, sceneId: this.scope.sceneId });
+    this.rememberEvent(event);
+    return { accepted: true, reason: 'event_recorded' };
   }
-}
-
-function combatHeadline(enemies = []) {
-  const alive = enemies.filter(enemy => enemy?.name && enemy.alive !== false);
-  if (!alive.length) return '战斗开始了。';
-  const grouped = new Map();
-  for (const enemy of alive) grouped.set(enemy.name, (grouped.get(enemy.name) || 0) + 1);
-  if (grouped.size !== 1) return '一群敌人来了。';
-  const [[name, count]] = grouped;
-  const countText = count === 2 ? '两只' : count === 3 ? '三只' : count === 4 ? '四只' : count > 1 ? `${count}只` : '';
-  return `${countText}${name}来袭～`;
 }
 
 module.exports = { DanmakuBridgeAdapter };

@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { DRAFT_ARCHETYPE_IDS, validateDraftImpactMessage, validateMessage, validateState } = require('./protocol');
+const { FACT_SCHEMA, validateFactAck, validateFactEvent } = require('./fact-protocol');
 
 const validState = {
   schema: 'gamebuddy.state.v1',
@@ -126,6 +127,70 @@ assert.equal(validateMessage({
 assert.equal(validateMessage({ type: 'event', name: 'made.up.event', timestamp: Date.now() }).ok, false);
 assert.equal(validateMessage({ type: 'state', data: { ...validState, player: { ...validState.player, energy: '3' } } }).ok, false);
 assert.equal(validateMessage({ type: 'unknown' }).ok, false);
+
+const fact = (overrides = {}) => ({
+  schema: FACT_SCHEMA,
+  eventVersion: 1,
+  eventId: 'source-test:1',
+  eventType: 'card.played',
+  runId: 'run-001',
+  segmentId: 'segment-001',
+  combatId: 'combat-001',
+  decisionId: null,
+  actionId: 'action-001',
+  parentActionId: null,
+  sourceSessionId: 'source-test',
+  sourceSeq: 1,
+  occurredAt: Date.now(),
+  sourceElapsedMs: 100,
+  attemptGeneration: 0,
+  contextSnapshotId: null,
+  quality: { observationMethod: 'direct_hook', unknownFields: [], unknownReasons: {} },
+  payload: { cardId: 'STRIKE_IRONCLAD', playMode: 'manual' },
+  ...overrides
+});
+assert.equal(validateFactEvent(fact()).ok, true);
+assert.equal(validateMessage({ type: 'fact', data: fact() }).ok, true);
+assert.equal(validateFactEvent(fact({ sourceSeq: 0 })).ok, false);
+assert.equal(validateFactEvent(fact({ eventType: 'invented.fact' })).ok, false);
+assert.equal(validateFactEvent(fact({
+  quality: {
+    observationMethod: 'direct_hook',
+    unknownFields: ['parentActionId'],
+    unknownReasons: { parentActionId: 'not_observed' }
+  }
+})).ok, true);
+assert.equal(validateFactEvent(fact({
+  quality: {
+    observationMethod: 'direct_hook',
+    unknownFields: ['parentActionId'],
+    unknownReasons: { parentActionId: 'maybe' }
+  }
+})).ok, false);
+assert.equal(validateFactEvent(fact({
+  eventType: 'combat.attempt_replaced',
+  attemptGeneration: 2,
+  payload: { replacedGeneration: 1 }
+})).ok, true);
+assert.equal(validateFactEvent(fact({
+  eventType: 'run.ended',
+  combatId: null,
+  attemptGeneration: null,
+  payload: { cleared: true, endReason: 'architect' }
+})).ok, true);
+assert.equal(validateFactEvent(fact({
+  eventType: 'capture.capability_reported',
+  combatId: null,
+  attemptGeneration: null,
+  payload: {
+    capabilities: {
+      card_play: { state: 'available' },
+      damage: { state: 'unavailable', reason: 'hook_failed' }
+    }
+  }
+})).ok, true);
+assert.equal(validateFactAck({ type: 'fact_ack', sourceSessionId: 'source-test', ackSourceSeq: 1 }).ok, true);
+assert.equal(validateFactAck({ type: 'fact_ack', sourceSessionId: '', ackSourceSeq: -1 }).ok, false);
 assert.equal(validateState({
   ...validState,
   map: {

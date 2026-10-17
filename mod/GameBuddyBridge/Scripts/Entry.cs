@@ -31,6 +31,11 @@ public class Entry
             try
             {
                 SaveLoadCountPatch.Apply(harmony, modDirectory);
+                GameBuddyLifecyclePatches.Apply(harmony, modDirectory);
+                GameBuddyCombatBoundaryPatches.Apply(harmony, modDirectory);
+                GameBuddyCombatFactPatches.Apply(harmony, modDirectory);
+                GameBuddySelectionFactPatches.Apply(harmony, modDirectory);
+                GameBuddyBuildFactPatches.Apply(harmony, modDirectory);
             }
             catch (Exception ex)
             {

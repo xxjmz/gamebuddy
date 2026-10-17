@@ -83,8 +83,7 @@
 
   function resultLabel(result) {
     if (result === 'win') return ['通关', 'win'];
-    if (result === 'loss') return ['未通关', 'loss'];
-    return ['中断', 'abandoned'];
+    return ['未通关', 'loss'];
   }
 
   function recentRuns(runs) {

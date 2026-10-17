@@ -93,12 +93,14 @@ test('delayed player echo is cancelled after the scene changes', async () => {
   });
   await adapter.ingestObservation(observation(1), { runId: 'run' });
   await adapter.submitShared('旧场景留言');
-  await adapter.ingestObservation(observation(2, {
+  const next = observation(2, {
     id: 'FUZZY_WURM_CRAWLER',
     name: '毛绒伏地虫',
     intent: 'attack',
     alive: true
-  }), { runId: 'run' });
+  });
+  next.state.run.floor = 2;
+  await adapter.ingestObservation(next, { runId: 'run' });
   adapter.director.queue = [];
   scheduled[0]();
   assert.equal(adapter.director.queue.length, 0);

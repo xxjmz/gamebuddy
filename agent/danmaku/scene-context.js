@@ -88,10 +88,12 @@ function extractSceneContext({ state = {}, trigger, event } = {}) {
   const combat = state.combat || null;
   const player = state.player || {};
   const enemies = (combat?.enemies || [])
-    .filter(enemy => enemy?.alive !== false)
-    .map(enemy => {
+    .map((enemy, slot) => {
+      if (!enemy || enemy.alive === false || enemy.hp === 0) return null;
       const intentKinds = parseIntentKinds(enemy?.intent, enemy?.intentKinds);
       return {
+        key: `${cleanText(enemy?.name)}#${slot}`,
+        slot,
         id: cleanText(enemy?.id),
         name: cleanText(enemy?.name),
         intent: primaryIntentKind(intentKinds) || 'none',
@@ -103,7 +105,7 @@ function extractSceneContext({ state = {}, trigger, event } = {}) {
         nextMoveName: cleanText(enemy?.nextMoveName)
       };
     })
-    .filter(enemy => enemy.name);
+    .filter(enemy => enemy?.name);
   const playerHp = Number.isFinite(player.hp) ? player.hp : null;
   const playerMaxHp = Number.isFinite(player.maxHp) ? player.maxHp : null;
   const resolvedTrigger = trigger || eventTrigger(event?.name);

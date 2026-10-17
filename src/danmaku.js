@@ -10,6 +10,7 @@ const composerSubmit = document.querySelector('#shared-composer-submit');
 const composerScene = document.querySelector('#shared-composer-scene');
 const composerStatus = document.querySelector('#shared-composer-status');
 const flyers = [];
+const displayedMessageIds = new Set();
 const SPEED = 105;
 let held = false;
 let ticking = false;
@@ -162,6 +163,18 @@ function startClock() {
 }
 
 function createDanmakuItem(message) {
+  if (message.source === 'monster_skill') {
+    const item = document.createElement('article');
+    item.className = 'gb-danmaku gb-danmaku--no-avatar danmaku-skill';
+    const label = document.createElement('span');
+    label.className = 'danmaku-speaker';
+    label.textContent = `技能 · ${message.skillLabel || '怪物当前行动'}`;
+    const text = document.createElement('p');
+    text.className = 'gb-danmaku__text';
+    text.textContent = String(message.text);
+    item.append(label, text);
+    return item;
+  }
   const presentation = window.GameBuddyDanmakuTheme?.presentationFor(message);
   if (presentation?.theme && window.GameBuddyDanmaku?.create) {
     return window.GameBuddyDanmaku.create({
@@ -183,7 +196,15 @@ function createDanmakuItem(message) {
 
 function showDanmaku(message) {
   if (!layer || !message?.text) return;
+  if (message.id && displayedMessageIds.has(message.id)) return;
   const item = createDanmakuItem(message);
+  item.dataset.source = message.source || 'other';
+  if (message.source === 'ai') {
+    const label = document.createElement('span');
+    label.className = 'danmaku-speaker danmaku-speaker--character';
+    label.textContent = message.speaker || ({ ironclad: '铁甲战士', silent: '静默猎手', defect: '故障机器人', regent: '储君', necrobinder: '亡灵契约师' }[message.character] || '观战者');
+    item.append(label);
+  }
   item.classList.add('danmaku-item');
   if (message.style === 'tense') item.classList.add('tense');
   const lane = Math.max(0, Math.min(2, Number(message.lane) || 0));
@@ -210,6 +231,11 @@ function showDanmaku(message) {
     item.append(detail);
   }
   layer.append(item);
+  if (message.id) {
+    displayedMessageIds.add(message.id);
+    while (displayedMessageIds.size > 4096) displayedMessageIds.delete(displayedMessageIds.values().next().value);
+    window.gamebuddyBridge?.acknowledgeDanmakuPresented?.(message.id);
+  }
   const width = item.getBoundingClientRect().width || 160;
   const pad = 36;
   const limit = Math.max(0, (window.innerWidth || 1280) - width - 24);

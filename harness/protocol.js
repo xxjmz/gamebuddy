@@ -1,3 +1,5 @@
+const { validateFactMessage } = require('./fact-protocol');
+
 const SUPPORTED_SCHEMA = 'gamebuddy.state.v1';
 const SUPPORTED_EVENTS = new Set(['run.started', 'run.ended', 'combat.started', 'turn.started', 'combat.ended', 'map.opened', 'rest.opened', 'rest.closed', 'event.opened', 'event.closed', 'shop.opened', 'shop.updated', 'shop.closed', 'card.played', 'card.reward.opened', 'card.reward.closed', 'card.reward.selected']);
 const RUN_RESULTS = new Set(['win', 'loss', 'abandoned']);
@@ -230,6 +232,7 @@ function stateSignature(state) {
 
 function validateMessage(message) {
   if (!message || typeof message !== 'object') return { ok: false, reason: 'message must be an object' };
+  if (message.type === 'fact') return validateFactMessage(message);
   if (message.type === 'state') return validateState(message.data);
   if (message.type !== 'event') return { ok: false, reason: `unsupported message type ${message.type || 'missing'}` };
   if (typeof message.name !== 'string' || !SUPPORTED_EVENTS.has(message.name)) return { ok: false, reason: `unsupported event ${message.name || 'missing'}` };

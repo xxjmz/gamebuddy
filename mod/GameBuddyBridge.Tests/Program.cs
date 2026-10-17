@@ -311,3 +311,15 @@ using (var restartedDocument = JsonDocument.Parse(restartedPending[0]))
 }
 
 Console.WriteLine("GameBuddy fact emitter resend tests passed.");
+
+var identityDirectory = Directory.CreateTempSubdirectory("gamebuddy-run-identities").FullName;
+var identities = new GameBuddyRunIdentityStore(identityDirectory);
+var firstRun = identities.BeginNew("same-seed-fingerprint");
+var secondRun = identities.BeginNew("same-seed-fingerprint");
+Assert(firstRun != secondRun, "A confirmed new run reused the prior run ID for the same seed.");
+var resumed = new GameBuddyRunIdentityStore(identityDirectory).Resume("same-seed-fingerprint");
+Assert(resumed == secondRun, "A saved run did not retain its run ID after a Mod restart.");
+identities.End(secondRun);
+Assert(identities.ActiveRunId is null, "An ended run remained active.");
+
+Console.WriteLine("GameBuddy run identity tests passed.");

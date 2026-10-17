@@ -38,36 +38,38 @@ test('director only queues explicit fixed dialogue and never adds corpus or mode
   assert.equal(director.queue[0].text.startsWith('撕咬！'), true);
 });
 
-test('combat entry uses one encounter headline and queues current actions', async () => {
+test('entry preserves independent skill introductions and hover details without AI', async () => {
   const adapter = new DanmakuBridgeAdapter({ now: () => 0 });
-  const input = state({ enemies: [
-    { id: 'NIBBIT', name: '小啃兽', hp: 42, maxHp: 46, block: 0, intent: 'AttackIntent', alive: true },
-    { id: 'NIBBIT', name: '小啃兽', hp: 40, maxHp: 46, block: 0, intent: 'AttackIntent', alive: true }
-  ] });
-  const result = await adapter.ingestObservation(observation(1, input), { runId: 'run' });
-  assert.equal(result.accepted, true);
-  const headline = adapter.director.queue.find(item => item.text === '两只小啃兽来袭～');
-  assert.ok(headline);
-  assert.match(headline.detail.lines.join('\n'), /循环/);
-  const actions = adapter.director.queue.filter(item => /！/.test(item.text) && item.text !== headline.text);
-  assert.equal(actions.length, 2);
-  assert.equal(actions.every(item => !item.text.startsWith('小啃兽')), true);
-  assert.equal(actions.every(item => /刚才大概是这么说的/.test(item.detail.title)), true);
-  assert.equal(actions.every(item => item.detail.lines.some(line => line.startsWith('行动：'))), true);
+  await adapter.ingestObservation(observation(1, state({ enemies: [
+    { id: 'NIBBIT', name: '小啃兽', intent: 'AttackIntent', nextMoveName: '顶撞' },
+    { id: 'NIBBIT', name: '小啃兽', intent: 'AttackIntent', nextMoveName: '顶撞' }
+  ] })), { runId: 'run' });
+  assert.equal(adapter.director.queue.length, 2);
+  for (const item of adapter.director.queue) {
+    assert.equal(item.source, 'monster_skill');
+    assert.match(item.detail.lines.join(' '), /行动：顶撞/);
+  }
+  assert.equal(adapter.tick().length, 1);
 });
 
-test('every changed action emits, including ordinary attacks and defenses', async () => {
-  const adapter = new DanmakuBridgeAdapter({ now: () => 0 });
-  const first = state({ sequence: 1, enemies: [{ id: 'NIBBIT', name: '小啃兽', intent: 'AttackIntent', nextMoveName: '撕咬', alive: true }] });
+test('skill changes appear immediately independently of the AI cadence', async () => {
+  let now = 0;
+  const adapter = new DanmakuBridgeAdapter({ now: () => now });
+  const first = state({ enemies: [{ name: '小啃兽', intent: 'AttackIntent', nextMoveName: '顶撞' }] });
   await adapter.ingestObservation(observation(1, first), { runId: 'run' });
-  const before = adapter.director.queue.length;
-  const second = state({ sequence: 2, enemies: [{ id: 'NIBBIT', name: '小啃兽', intent: 'DefendIntent', nextMoveName: '缩壳', alive: true }] });
+  const second = state({ enemies: [{ name: '小啃兽', intent: 'DefendIntent', nextMoveName: '缩壳' }] });
   const result = await adapter.ingestObservation(observation(2, second), { runId: 'run' });
-  assert.equal(result.accepted, true);
-  assert.equal(adapter.director.queue.length > before, true);
-  const latest = adapter.director.queue.at(-1);
-  assert.match(latest.text, /缩壳！/);
-  assert.match(latest.detail.lines.join('\n'), /类型：防御/);
+  assert.equal(result.reason, 'skills_updated');
+  assert.equal(adapter.director.queue.length, 2);
+  assert.match(adapter.director.queue.at(-1).detail.lines.join(' '), /行动：缩壳/);
+  const firstMessage = adapter.tick()[0];
+  now = 500;
+  const secondMessage = adapter.tick()[0];
+  assert.equal(firstMessage.source, 'monster_skill');
+  assert.equal(secondMessage.source, 'monster_skill');
+  adapter.director.acknowledgePresented(secondMessage.id);
+  assert.equal(adapter.director.presentationStats().bySource.monster_skill, 1);
+  assert.equal(adapter.director.presentationStats().commentaryAiPercent, null);
 });
 
 test('recommendations create deterministic advice danmaku with hover description', async () => {
@@ -135,4 +137,218 @@ test('death switches shared timing to death while keeping the same scene object'
   assert.equal(adapter.getSharedScene().phase, 'death');
   assert.equal(adapter.getSharedScene().sceneKey, 'sts2-v1:ironclad:combat:nibbit');
   assert.ok(adapter.director.queue.some(item => item.text === '倒在这里，也算见过世面了。'));
+});
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test('text dedupe covers queued, recent and cross-scene comments but expires', () => {
+  let now = 0;
+  const d = new DanmakuDirector({ now: () => now });
+  let scope = { runId: 'r', sceneId: 's', stateRevision: 1 };
+  d.setContext(scope);
+  const emit = (id, text) => d.burst({ ...scope, eventId: id, trigger: 'ai_atmosphere', key: id, priority: 3, factTexts: [text] });
+  assert.equal(emit('a', '这一拳，记下了。').count, 1);
+  assert.equal(emit('b', '这一拳记下了！').accepted, false);
+  assert.equal(d.tick().length, 1);
+  scope = { ...scope, sceneId: 'next' };
+  d.setContext(scope);
+  now = 20_000;
+  assert.equal(emit('c', '这一拳记下了').accepted, false);
+  now = 90_000;
+  assert.equal(emit('d', '这一拳记下了').count, 1);
+});
+
+test('same short advice for distinct decisions is preserved', () => {
+  const d = new DanmakuDirector();
+  const scope = { runId: 'r', sceneId: 's', stateRevision: 1 };
+  d.setContext(scope);
+  for (const id of ['reward-1', 'reward-2']) {
+    assert.equal(d.burst({ ...scope, eventId: id, trigger: 'recommendation', key: id, recommendationId: id,
+      priority: 3, factTexts: ['跳过这次奖励。'] }).accepted, true);
+  }
+  assert.equal(d.queue.length, 2);
+});
+
+test('enemy deaths, summons and temporary empty lists do not repeat entry or shared fetch', async () => {
+  let requests = 0;
+  const adapter = new DanmakuBridgeAdapter({ now: () => 0, sharedClient: {
+    enabled: true, list: async () => { requests += 1; return []; }
+  } });
+  await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+  const sceneId = adapter.scope.sceneId;
+  for (const [i, enemies] of [[], [{ id: 'OTHER', name: '新敌人', intent: 'AttackIntent' }], []].entries()) {
+    await adapter.ingestObservation(observation(i + 2, state({ enemies })), { runId: 'run' });
+    assert.equal(adapter.scope.sceneId, sceneId);
+  }
+  assert.equal(requests, 1);
+  await adapter.ingestObservation(observation(5, state({ combat: false })), { runId: 'run' });
+  await adapter.ingestObservation(observation(6, state({ floor: 5 })), { runId: 'run' });
+  assert.notEqual(adapter.scope.sceneId, sceneId);
+  assert.equal(requests, 2);
+});
+
+test('explicit new combat ID changes scene without needing an empty snapshot', async () => {
+  const adapter = new DanmakuBridgeAdapter();
+  const first = state(); first.combat.combatId = 'a';
+  await adapter.ingestObservation(observation(1, first), { runId: 'run' });
+  const previous = adapter.scope.sceneId;
+  const second = state(); second.combat.combatId = 'b';
+  await adapter.ingestObservation(observation(2, second), { runId: 'run' });
+  assert.notEqual(adapter.scope.sceneId, previous);
+});
+
+test('entry requests two AI lines while preserving skill introductions', async () => {
+  const contexts = [];
+  const adapter = new DanmakuBridgeAdapter({ llmAtmosphere: { generate: async context => {
+    contexts.push(context);
+    return { status: 'generated', phrases: ['这一下，记下了。', '又能往上走了。', '第三句不显示。'] };
+  } } });
+  await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+  await settle();
+  assert.equal(contexts[0].trigger, 'periodic');
+  assert.equal(adapter.director.queue.filter(item => item.source === 'ai').length, 2);
+  assert.equal(adapter.director.queue.filter(item => item.source === 'monster_skill').length, 1);
+});
+
+test('unavailable, failed or repeated AI does not produce fixed filler or remove skill messages', async () => {
+  for (const status of ['unavailable', 'failed', 'throttled', 'duplicate']) {
+    const adapter = new DanmakuBridgeAdapter({ llmAtmosphere: { generate: async () => ({ status, phrases: [] }) } });
+    await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+    await settle();
+    assert.equal(adapter.director.queue.length, 1);
+    assert.equal(adapter.director.queue[0].source, 'monster_skill');
+  }
+});
+
+test('every 15 seconds uses latest state and Mod events even while an earlier batch is pending', async () => {
+  let now = 0;
+  const requests = [];
+  const adapter = new DanmakuBridgeAdapter({ now: () => now, llmAtmosphere: { generate: (context, options) =>
+    new Promise(resolve => requests.push({ context, options, resolve })) } });
+  await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+  await settle();
+  now = 4000;
+  const next = state({ enemies: [{ name: '新怪物', intent: 'DefendIntent', nextMoveName: '缩壳', hp: 12 }] });
+  next.player.hp = 25;
+  await adapter.ingestObservation(observation(2, next), { runId: 'run' });
+  await adapter.ingestEvent({ name: 'card.played', eventId: 'card-1', data: { cardName: '痛击' } });
+  await adapter.ingestEvent({ name: 'card.played', eventId: 'card-1', data: { cardName: '痛击' } });
+  adapter.tick(); await settle();
+  assert.equal(requests.length, 1);
+  now = 14999; adapter.tick(); await settle();
+  assert.equal(requests.length, 1);
+  now = 15000; adapter.tick(); await settle();
+  assert.equal(requests.length, 2);
+  const second = requests[1].context;
+  assert.equal(second.snapshot.player.hp, 25);
+  assert.equal(second.snapshot.enemies[0].name, '新怪物');
+  assert.match(second.facts.join(' '), /缩壳/);
+  assert.equal(second.recentEvents.length, 1);
+  assert.match(second.recentEvents[0].facts.join(' '), /痛击/);
+  assert.notEqual(second.batchId, requests[0].context.batchId);
+  requests[0].resolve({ status: 'generated', phrases: ['刚才那一下，记下了。', '这伤口也算纪念。'] });
+  await settle();
+  assert.equal(adapter.director.queue.filter(item => item.source === 'ai').length, 0, 'old target disappeared before its response');
+  now = 80000; adapter.tick(); await settle();
+  assert.equal(requests.length, 3, 'missed slots must not trigger a burst of requests');
+  assert.equal(requests[2].context.recentEvents.length, 0);
+  adapter.invalidate();
+  assert.ok(requests.slice(1).every(item => item.options.signal.aborted));
+  requests.slice(1).forEach(item => item.resolve({ status: 'cancelled', phrases: [] }));
+  await settle();
+});
+
+test('same-scene pending AI survives ordinary snapshot and action changes', async () => {
+  let resolve;
+  const adapter = new DanmakuBridgeAdapter({ llmAtmosphere: { generate: () => new Promise(done => { resolve = done; }) } });
+  await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+  await settle();
+  const next = state({ enemies: [{ name: '小啃兽', intent: 'DefendIntent' }] }); next.player.hp -= 1;
+  await adapter.ingestObservation(observation(2, next), { runId: 'run' });
+  resolve({ status: 'generated', phrases: ['这一下，记下了。'] });
+  await settle();
+  assert.equal(adapter.director.queue.some(item => item.text === '这一下，记下了。'), true);
+});
+
+test('leaving, disconnect, death, new run or character cancels pending AI and prevents stale display', async () => {
+  for (const change of ['invalidate', 'new_scene', 'close', 'death', 'character', 'run']) {
+    const requests = [];
+    const adapter = new DanmakuBridgeAdapter({ llmAtmosphere: { generate: (context, options) =>
+      new Promise(resolve => requests.push({ context, options, resolve })) } });
+    await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+    await settle();
+    if (change === 'invalidate') adapter.invalidate();
+    if (change === 'new_scene') await adapter.ingestObservation(observation(2, state({ floor: 5 })), { runId: 'run' });
+    if (change === 'close') await adapter.ingestEvent({ name: 'combat.ended' });
+    if (change === 'death') { const dead = state({ combat: false }); dead.player.hp = 0;
+      await adapter.ingestObservation(observation(2, dead), { runId: 'run' }); }
+    if (change === 'run') await adapter.ingestObservation(observation(2, state()), { runId: 'new-run' });
+    if (change === 'character') { const other = state(); other.run.character = 'necrobinder';
+      await adapter.ingestObservation(observation(2, other), { runId: 'run' }); }
+    await settle();
+    assert.equal(requests[0].options.signal.aborted, true, change);
+    requests[0].resolve({ status: 'generated', phrases: ['这是已经过时的感想。'] });
+    await settle();
+    assert.equal(adapter.director.queue.some(item => item.text === '这是已经过时的感想。'), false, change);
+    if (change === 'character') assert.equal(requests[1].context.character, 'necrobinder');
+    adapter.invalidate();
+    requests.slice(1).forEach(item => item.resolve({ status: 'cancelled', phrases: [] }));
+    await settle();
+  }
+});
+
+test('duplicate death notifications cannot refetch the same death scene', async () => {
+  let deaths = 0;
+  const adapter = new DanmakuBridgeAdapter({ sharedClient: { enabled: true, list: async ({ phase }) => {
+    if (phase === 'death') deaths += 1;
+    return [];
+  } } });
+  await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
+  const dead = state({ combat: false }); dead.player.hp = 0;
+  await adapter.ingestObservation(observation(2, dead), { runId: 'run' });
+  await adapter.ingestEvent({ name: 'combat.ended', eventId: 'ended-again' });
+  await settle();
+  assert.equal(deaths, 1);
+  assert.equal(adapter.getSharedScene().phase, 'death');
+});
+
+test('presentation ratios count only unique renderer acknowledgements and separate advice/shared', () => {
+  let now = 0;
+  const d = new DanmakuDirector({ now: () => now });
+  const scope = { runId: 'r', sceneId: 's', stateRevision: 1 };
+  d.setContext(scope);
+  assert.equal(d.presentationStats().aiPercent, null);
+  for (const [i, source] of ['ai', 'original_template', 'recommendation', 'shared'].entries()) {
+    const text = `来源测试 ${i}`;
+    d.burst({ ...scope, eventId: `${i}`, trigger: 'test', key: `${i}`, priority: 3, factTexts: [text],
+      factSourceByText: { [text]: { source } } });
+    now = i * 6000;
+    const [message] = d.tick();
+    assert.equal(d.presentationStats().total, i);
+    assert.equal(d.acknowledgePresented('unknown'), false);
+    assert.equal(d.acknowledgePresented(message.id), true);
+    assert.equal(d.acknowledgePresented(message.id), false);
+  }
+  assert.equal(d.presentationStats().total, 4);
+  assert.equal(d.presentationStats().aiPercent, 25);
+  assert.equal(d.presentationStats().commentaryAiPercent, 50);
+  d.burst({ ...scope, eventId: 'never-rendered', trigger: 'test', key: 'never', priority: 3, factTexts: ['已经过时了。'] });
+  now += 40_000;
+  assert.deepEqual(d.tick(), []);
+  assert.equal(d.presentationStats().total, 4);
+});
+
+test('queued fixed comments cannot bunch up after a backlog or block AI', () => {
+  let now = 0;
+  const d = new DanmakuDirector({ now: () => now });
+  const scope = { runId: 'r', sceneId: 's', stateRevision: 1 };
+  d.setContext(scope);
+  const texts = ['固定一', '固定二', '新鲜评论'];
+  d.burst({ ...scope, eventId: 'batch', trigger: 'test', factTexts: texts,
+    factSourceByText: { 新鲜评论: { source: 'ai' } } });
+  now = 10_000;
+  assert.equal(d.tick()[0].text, '固定一');
+  now = 12_000;
+  assert.equal(d.tick()[0].text, '新鲜评论');
+  assert.equal(d.queue.length, 0);
 });

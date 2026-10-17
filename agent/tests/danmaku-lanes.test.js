@@ -9,7 +9,8 @@ test('only three lanes are available inside the marked band', () => {
   const director = new DanmakuDirector({ now: () => now, gapMs: 450 });
   const scope = { runId: 'run', sceneId: 'scene', stateRevision: 1 };
   director.setContext(scope);
-  director.burst({ ...scope, eventId: 'burst', trigger: 'entry', factTexts: ['一', '二', '三', '四'] });
+  director.burst({ ...scope, eventId: 'burst', trigger: 'shared_combat', factTexts: ['一', '二', '三', '四'],
+    factSourceByText: Object.fromEntries(['一', '二', '三', '四'].map(text => [text, { source: 'shared' }])) });
 
   const lanes = [];
   for (now of [0, 450, 900, 1350]) {

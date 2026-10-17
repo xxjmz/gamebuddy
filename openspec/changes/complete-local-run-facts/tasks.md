@@ -1,14 +1,14 @@
 ## 1. 事实契约与夹具
 
-- [ ] 1.1 定义 `gamebuddy.fact-event.v1` 信封、事件字典、质量原因和 capability report，并为合法重复事件、重复传输、序号缺口和 unknown 原因增加协议测试；运行 `npm run harness:validate-protocol`。
-- [ ] 1.2 增加覆盖完整对局、战斗中十次读档、选择未知、Architect 结局和 Hook 不可用的 Replay fixtures；先用断言锁定同一 `runId/combatId`、最新尝试有效和 coverage 语义，再运行 `npm run harness:validate-all`。
+- [x] 1.1 定义 `gamebuddy.fact-event.v1` 信封、事件字典、质量原因和 capability report，并为合法重复事件、重复传输、序号缺口和 unknown 原因增加协议测试；运行 `npm run harness:validate-protocol`。
+- [x] 1.2 增加覆盖完整对局、战斗中十次读档、选择未知、Architect 结局和 Hook 不可用的 Replay fixtures；先用断言锁定同一 `runId/combatId`、最新尝试有效和 coverage 语义，再运行 `npm run harness:validate-all`。
 
 ## 2. 本地事实记录器
 
-- [ ] 2.1 在 Electron `userData/facts/v1` 实现 manifest、事件、快照、coverage 和可重建索引的版本化存储；用临时目录测试重启恢复、事件 ID 去重、合法重复动作和损坏尾部。
-- [ ] 2.2 实现战斗 generation 临时块与 manifest 原子指针切换；用夹具验证读档后同一 `combatId` 只返回最新尝试，崩溃时不会混合两次尝试。
+- [x] 2.1 在 Electron `userData/facts/v1` 实现 manifest、事件、快照、coverage 和可重建索引的版本化存储；用临时目录测试重启恢复、事件 ID 去重、合法重复动作和损坏尾部。
+- [x] 2.2 实现战斗 generation 临时块与 manifest 原子指针切换；用夹具验证读档后同一 `combatId` 只返回最新尝试，崩溃时不会混合两次尝试。
 - [x] 2.3 实现持久提交后的连续确认、Mod 有序重发和 gap 记录；测试短断线补发、源会话重启、队列溢出、磁盘满时不错误确认且不阻塞。
-- [ ] 2.4 修改录制与 Replay，按事件 ID 而非内容去重，保持源序号、generation、覆盖和 replay 标记；重复导入同一 fixture 应生成相同摘要。
+- [x] 2.4 修改录制与 Replay，按事件 ID 而非内容去重，保持源序号、generation、覆盖和 replay 标记；重复导入同一 fixture 应生成相同摘要。
 
 ## 3. 对局、读档与战斗身份
 
