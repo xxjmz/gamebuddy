@@ -109,4 +109,41 @@ Assert(GameBuddyRewardImpactCodec.TryParse(Message(Card("ANGER", 8, withScore)),
     && scored.Impacts["ANGER"].Archetypes[0].AfterScore == 17,
     "before/after score was not retained.");
 
+static RewardSelectionCard RewardCard(string id, bool upgraded = false) => new(id, upgraded);
+
+var selection = new GameBuddyRewardSelectionTracker();
+var baseline = new[] { RewardCard("STRIKE"), RewardCard("STRIKE"), RewardCard("BASH", true) };
+var candidates = new[] { RewardCard("ANGER"), RewardCard("POMMEL_STRIKE"), RewardCard("BASH", true) };
+selection.Begin("reward-1", baseline, candidates);
+selection.Close("reward-1");
+var deckWithPick = baseline.Append(RewardCard("POMMEL_STRIKE")).ToArray();
+Assert(selection.Observe(deckWithPick) is null, "An unsettled deck snapshot confirmed a selection.");
+var confirmed = selection.Observe(deckWithPick);
+Assert(confirmed == new RewardSelectionResult("reward-1", "POMMEL_STRIKE", false),
+    "A unique candidate increase was not confirmed.");
+Assert(selection.Observe(deckWithPick) is null, "The same reward emitted more than one selection.");
+
+selection.Begin("reward-2", baseline, candidates);
+selection.Close("reward-2");
+Assert(selection.Observe(baseline) is null && selection.Observe(baseline) is null,
+    "Skipping a reward must not emit a selection.");
+
+selection.Begin("reward-3", baseline, candidates);
+selection.Close("reward-3");
+var ambiguousDeck = baseline.Concat([RewardCard("ANGER"), RewardCard("POMMEL_STRIKE")]).ToArray();
+Assert(selection.Observe(ambiguousDeck) is null && selection.Observe(ambiguousDeck) is null,
+    "Multiple candidate increases must remain unknown.");
+
+selection.Begin("reward-4", baseline, candidates);
+selection.Close("another-reward");
+Assert(selection.Observe(deckWithPick) is null && selection.Observe(deckWithPick) is null,
+    "Closing a different reward signature must not confirm a selection.");
+
+selection.Begin("reward-5", baseline, [RewardCard("BASH", true)]);
+selection.Close("reward-5");
+var upgradedCandidateDeck = baseline.Append(RewardCard("BASH", true)).ToArray();
+Assert(selection.Observe(upgradedCandidateDeck) is null
+    && selection.Observe(upgradedCandidateDeck)?.Upgraded == true,
+    "Candidate identity must include upgraded state.");
+
 Console.WriteLine("GameBuddy reward impact codec tests passed.");

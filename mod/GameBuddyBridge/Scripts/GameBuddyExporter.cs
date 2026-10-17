@@ -44,6 +44,7 @@ public static class GameBuddyExporter
     private static GameBuddyState? _restOpenSnapshot;
     private static Node? _activeCardRewardScreen;
     private static string _lastCardRewardSignature = string.Empty;
+    private static readonly GameBuddyRewardSelectionTracker RewardSelectionTracker = new();
     private static List<string> _lastCombatEnemies = new();
     private static string? _lastCombatNodeType;
     private static string _lastEventSignature = string.Empty;
@@ -113,6 +114,7 @@ public static class GameBuddyExporter
                 _lastCombatNodeType = snapshot.Run.CurrentNode ?? snapshot.Run.Room;
             }
             PublishCardRewardIfReady(snapshot);
+            PublishSelectedCardIfReady(snapshot);
             PublishTransitions(snapshot);
             PublishEventLifecycle(snapshot);
             PublishShopLifecycle(snapshot);
@@ -358,6 +360,10 @@ public static class GameBuddyExporter
 
     public static void TrackCardRewardScreen(Node screen)
     {
+        if (!ReferenceEquals(_activeCardRewardScreen, screen))
+        {
+            RewardSelectionTracker.Reset();
+        }
         _activeCardRewardScreen = screen;
         _lastCardRewardSignature = string.Empty;
     }
@@ -366,8 +372,8 @@ public static class GameBuddyExporter
     {
         if (ReferenceEquals(_activeCardRewardScreen, screen))
         {
+            RewardSelectionTracker.Close(_lastCardRewardSignature);
             _activeCardRewardScreen = null;
-            _lastCardRewardSignature = string.Empty;
             PublishEvent("card.reward.closed");
         }
     }
@@ -402,6 +408,10 @@ public static class GameBuddyExporter
         }
 
         _lastCardRewardSignature = signature;
+        RewardSelectionTracker.Begin(
+            signature,
+            snapshot.Player.Cards.Select(card => new RewardSelectionCard(card.Id, card.Upgraded)),
+            mapped.Select(card => new RewardSelectionCard(card.Id, card.Upgraded)));
         GameBuddyRewardOverlay.SetOffer((MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardRewardSelectionScreen)screen, signature, mapped.Select(card => card.Id));
         PublishEvent("card.reward.opened", new
         {
@@ -420,6 +430,23 @@ public static class GameBuddyExporter
                 nextBossId = snapshot.Run.NextBossId,
                 nextBoss = snapshot.Run.NextBoss
             }
+        });
+    }
+
+    private static void PublishSelectedCardIfReady(GameBuddyState snapshot)
+    {
+        var selected = RewardSelectionTracker.Observe(
+            snapshot.Player.Cards.Select(card => new RewardSelectionCard(card.Id, card.Upgraded)));
+        if (selected is null)
+        {
+            return;
+        }
+
+        PublishEvent("card.reward.selected", new
+        {
+            signature = selected.Signature,
+            cardId = selected.CardId,
+            upgraded = selected.Upgraded
         });
     }
 

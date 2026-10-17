@@ -1,5 +1,5 @@
 const SUPPORTED_SCHEMA = 'gamebuddy.state.v1';
-const SUPPORTED_EVENTS = new Set(['combat.started', 'turn.started', 'combat.ended', 'map.opened', 'rest.opened', 'rest.closed', 'event.opened', 'event.closed', 'shop.opened', 'shop.updated', 'shop.closed', 'card.played', 'card.reward.opened', 'card.reward.closed']);
+const SUPPORTED_EVENTS = new Set(['combat.started', 'turn.started', 'combat.ended', 'map.opened', 'rest.opened', 'rest.closed', 'event.opened', 'event.closed', 'shop.opened', 'shop.updated', 'shop.closed', 'card.played', 'card.reward.opened', 'card.reward.closed', 'card.reward.selected']);
 const CARD_SOURCES = new Set(['runtime', 'catalog', 'unavailable']);
 const SHOP_ITEM_TYPES = new Set(['card', 'relic', 'potion', 'service']);
 const DRAFT_ARCHETYPE_IDS = ['auto_strike', 'exhaust', 'strength', 'block'];
@@ -228,6 +228,19 @@ function validateMessage(message) {
   if (message.name === 'card.reward.opened' && message.data !== undefined && message.data !== null) {
     const validation = validateReward(message.data, 'card.reward.opened data');
     if (!validation.ok) return validation;
+  }
+  if (message.name === 'card.reward.selected') {
+    const data = message.data;
+    if (!data || typeof data !== 'object') return { ok: false, reason: 'card.reward.selected data must be an object' };
+    if (typeof data.signature !== 'string' || !data.signature || data.signature.length > 1024) {
+      return { ok: false, reason: 'card.reward.selected signature must be a non-empty string' };
+    }
+    if (typeof data.cardId !== 'string' || !data.cardId || data.cardId.length > 128) {
+      return { ok: false, reason: 'card.reward.selected cardId must be a non-empty string' };
+    }
+    if (typeof data.upgraded !== 'boolean') {
+      return { ok: false, reason: 'card.reward.selected upgraded must be a boolean' };
+    }
   }
   if ((message.name === 'shop.opened' || message.name === 'shop.updated') && message.data !== undefined && message.data !== null) {
     const validation = validateShop(message.data, `${message.name} data`);

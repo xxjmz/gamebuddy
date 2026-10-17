@@ -85,6 +85,24 @@ assert.equal(validateMessage({
   timestamp: Date.now(),
   data: { cards: ['IRON_WAVE'], signature: 42 }
 }).ok, false);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'card.reward.selected',
+  timestamp: Date.now(),
+  data: { signature: 'ANGER:False|IRON_WAVE:False', cardId: 'IRON_WAVE', upgraded: false }
+}).ok, true);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'card.reward.selected',
+  timestamp: Date.now(),
+  data: { signature: 'ANGER:False|IRON_WAVE:False', cardId: '', upgraded: false }
+}).ok, false);
+assert.equal(validateMessage({
+  type: 'event',
+  name: 'card.reward.selected',
+  timestamp: Date.now(),
+  data: { signature: 'ANGER:False|IRON_WAVE:False', cardId: 'IRON_WAVE' }
+}).ok, false);
 assert.equal(validateMessage({ type: 'event', name: 'made.up.event', timestamp: Date.now() }).ok, false);
 assert.equal(validateMessage({ type: 'state', data: { ...validState, player: { ...validState.player, energy: '3' } } }).ok, false);
 assert.equal(validateMessage({ type: 'unknown' }).ok, false);

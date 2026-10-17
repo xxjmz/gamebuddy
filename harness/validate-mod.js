@@ -9,7 +9,8 @@ const requiredFiles = [
   'build.ps1',
   'Scripts/Entry.cs',
   'Scripts/GameBuddyCollectorNode.cs',
-  'Scripts/GameBuddyExporter.cs'
+  'Scripts/GameBuddyExporter.cs',
+  'Scripts/GameBuddyRewardSelectionTracker.cs'
 ];
 
 for (const relative of requiredFiles) {
@@ -23,7 +24,7 @@ if (manifest.id !== 'gamebuddy_bridge' || manifest.has_dll !== true || manifest.
 
 const exporter = fs.readFileSync(path.join(root, 'Scripts', 'GameBuddyExporter.cs'), 'utf8');
 const exporterAndPatches = exporter + fs.readFileSync(path.join(root, 'Scripts', 'CardRewardPatches.cs'), 'utf8');
-for (const marker of ['127.0.0.1', '27182', 'gamebuddy.state.v1', 'DebugOnlyGetState', 'LocalContext.GetMe', 'NextMove', 'BroadcastState', 'BroadcastEvent', 'GameBuddyWebSocketServer', 'GetAllMapPoints', 'MapPointType', 'rest.opened', 'rest.closed', 'NCardRewardSelectionScreen', 'TrackCardRewardScreen', 'ClearCardRewardScreen', 'card.reward.opened', 'EventRoom', 'NEventRoom', 'NEventOptionButton', 'event.opened', 'event.closed', 'MerchantRoom', 'MerchantInventory', 'CardEntries', 'RelicEntries', 'PotionEntries', 'shop.opened', 'shop.updated', 'shop.closed', 'CARD_REMOVAL', 'EventId', 'PageId', 'OptionId', 'display text as the compatibility path', 'OrderByDescending(card => card.IsUpgraded)', 'DynamicDescription', 'DescriptionSource', 'EnergyCostX', 'StarCost', 'StarCostX', 'StarCostSource', 'Optional cost metadata can move between early-access patches']) {
+for (const marker of ['127.0.0.1', '27182', 'gamebuddy.state.v1', 'DebugOnlyGetState', 'LocalContext.GetMe', 'NextMove', 'BroadcastState', 'BroadcastEvent', 'GameBuddyWebSocketServer', 'GetAllMapPoints', 'MapPointType', 'rest.opened', 'rest.closed', 'NCardRewardSelectionScreen', 'TrackCardRewardScreen', 'ClearCardRewardScreen', 'card.reward.opened', 'card.reward.selected', 'RewardSelectionTracker', 'EventRoom', 'NEventRoom', 'NEventOptionButton', 'event.opened', 'event.closed', 'MerchantRoom', 'MerchantInventory', 'CardEntries', 'RelicEntries', 'PotionEntries', 'shop.opened', 'shop.updated', 'shop.closed', 'CARD_REMOVAL', 'EventId', 'PageId', 'OptionId', 'display text as the compatibility path', 'OrderByDescending(card => card.IsUpgraded)', 'DynamicDescription', 'DescriptionSource', 'EnergyCostX', 'StarCost', 'StarCostX', 'StarCostSource', 'Optional cost metadata can move between early-access patches']) {
   if (!exporterAndPatches.includes(marker)) throw new Error(`Mod exporter is missing marker: ${marker}`);
 }
 
