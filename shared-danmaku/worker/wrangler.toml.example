@@ -1,0 +1,12 @@
+name = "gamebuddy-shared-danmaku"
+main = "src/index.js"
+compatibility_date = "2026-09-24"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gamebuddy-shared-danmaku"
+# 创建数据库后，把这里替换成真实 database_id。
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[vars]
+# 生产环境请用 wrangler secret put SHARED_DANMAKU_SALT 设置，不要提交真实值。

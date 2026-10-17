@@ -183,6 +183,13 @@ h1 { margin: 9px 0 7px; color: var(--cream); font: 500 30px Georgia, "Songti SC"
 .draft-card-head { display: flex; align-items: center; justify-content: space-between; }
 .draft-card-head strong { color: var(--mint); font: 600 22px Georgia, serif; }
 .draft-card.top-pick .draft-card-head strong { color: var(--amber); }
+.archetype-impacts { display: grid; gap: 4px; margin-top: 9px; }
+.archetype-impact { display: flex; justify-content: space-between; gap: 5px; padding: 4px 6px; border: 1px solid #6a4a30; color: var(--cream); background: #2a2118; font-size: 9px; }
+.archetype-impact strong { color: inherit; font-weight: 700; white-space: nowrap; }
+.archetype-impact span { overflow: hidden; font-weight: 500; opacity: .82; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.archetype-impact.positive { border-color: #8a6234; color: #e0a15a; }
+.archetype-impact.negative { border-color: #6a4038; color: #c48474; }
+.draft-card .archetype-impacts + .card-name { margin-top: 8px; }
 .draft-card-meta { margin-top: 7px; color: #827d73; font-size: 9px; }
 .draft-fit { display: flex; gap: 6px; margin-top: 13px; }
 .draft-fit span { padding: 4px 6px; border: 1px solid #4a5050; color: #929b99; font-size: 9px; }
@@ -209,6 +216,21 @@ h1 { margin: 9px 0 7px; color: var(--cream); font: 500 30px Georgia, "Songti SC"
 .draft-disclaimer { min-height: 72px; margin-top: 18px; }
 .pick-tag { display: inline-block; padding: 4px 6px; background: var(--amber); color: #261e13; font-size: 9px; font-weight: 700; }
 .draft-side { padding: 20px; }
+.archetype-overview { margin: 0 0 8px; padding: 12px 12px 10px; border: 1px solid #6e4b2a; background: #241c16; }
+.archetype-overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 9px; padding-bottom: 8px; border-bottom: 2px solid #c47a3a; }
+.archetype-overview-head > strong { color: var(--cream); font: 600 13px Georgia, serif; }
+.archetype-build-state { color: #8d8276; font-size: 9px; letter-spacing: .4px; }
+.archetype-build-state.primary { color: #e0a15a; }
+.archetype-build-state.mixed { color: var(--amber); }
+.archetype-score { margin-top: 7px; }
+.archetype-score > div:first-child { display: flex; justify-content: space-between; color: #b7aa9b; font-size: 9px; }
+.archetype-score strong { color: var(--cream); font: 600 12px Georgia, serif; }
+.archetype-score.leader > div:first-child { color: var(--cream); }
+.archetype-score.leader strong { color: #e0a15a; }
+.archetype-score-track { height: 4px; margin-top: 4px; background: #3a3128; }
+.archetype-score-track span { display: block; height: 100%; background: #a56b3c; }
+.archetype-score.leader .archetype-score-track span { background: #e0a15a; }
+.archetype-win-note { margin-top: 8px; color: #8d8276; font-size: 8px; text-align: right; }
 .deck-stat { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #2b3031; color: #84908e; font-size: 11px; }
 .deck-stat strong { color: var(--cream); font-weight: 500; }
 .route-layout { grid-template-columns: 1.55fr .8fr; }

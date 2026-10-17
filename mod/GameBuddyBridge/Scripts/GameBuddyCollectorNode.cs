@@ -21,6 +21,14 @@ internal static class GameBuddyCollectorNode
 
     private static void OnProcessFrame()
     {
+        try
+        {
+            GameBuddyRewardOverlay.ProcessFrame();
+        }
+        catch (Exception ex)
+        {
+            GD.PushWarning($"[GameBuddyBridge] reward overlay skipped: {ex.Message}");
+        }
         if (!_reportedReady)
         {
             _reportedReady = true;

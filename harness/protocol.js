@@ -2,6 +2,7 @@ const SUPPORTED_SCHEMA = 'gamebuddy.state.v1';
 const SUPPORTED_EVENTS = new Set(['combat.started', 'turn.started', 'combat.ended', 'map.opened', 'rest.opened', 'rest.closed', 'event.opened', 'event.closed', 'shop.opened', 'shop.updated', 'shop.closed', 'card.played', 'card.reward.opened', 'card.reward.closed']);
 const CARD_SOURCES = new Set(['runtime', 'catalog', 'unavailable']);
 const SHOP_ITEM_TYPES = new Set(['card', 'relic', 'potion', 'service']);
+const DRAFT_ARCHETYPE_IDS = ['auto_strike', 'exhaust', 'strength', 'block'];
 
 function validateCardSnapshot(card, prefix) {
   if (typeof card === 'string' && card) return { ok: true };
@@ -46,6 +47,9 @@ function validateReward(reward, prefix = 'reward') {
   }
   if (reward.canSkip !== undefined && typeof reward.canSkip !== 'boolean') {
     return { ok: false, reason: `${prefix}.canSkip must be a boolean` };
+  }
+  if (reward.signature !== undefined && (typeof reward.signature !== 'string' || !reward.signature || reward.signature.length > 1024)) {
+    return { ok: false, reason: `${prefix}.signature must be a non-empty string` };
   }
   return { ok: true };
 }
@@ -231,4 +235,68 @@ function validateMessage(message) {
   return { ok: true };
 }
 
-module.exports = { SUPPORTED_EVENTS, SUPPORTED_SCHEMA, validateCardSnapshot, validateShop, validateMessage, validateState, stateSignature };
+function validateDraftImpactMessage(message) {
+  if (!message || typeof message !== 'object' || message.type !== 'draft_impact') {
+    return { ok: false, reason: 'message must be a draft_impact object' };
+  }
+  if (typeof message.signature !== 'string' || !message.signature || message.signature.length > 1024) {
+    return { ok: false, reason: 'draft_impact.signature must be a non-empty string' };
+  }
+  if (!Array.isArray(message.impacts) || message.impacts.length < 1 || message.impacts.length > 6) {
+    return { ok: false, reason: 'draft_impact.impacts must contain 1 to 6 entries' };
+  }
+  const cardIds = new Set();
+  for (const impact of message.impacts) {
+    if (!impact || typeof impact !== 'object'
+      || typeof impact.cardId !== 'string' || !impact.cardId || impact.cardId.length > 128
+      || cardIds.has(impact.cardId)) {
+      return { ok: false, reason: 'draft_impact cardId must be unique and non-empty' };
+    }
+    cardIds.add(impact.cardId);
+    if (!Number.isInteger(impact.deltaPoints) || impact.deltaPoints < -100 || impact.deltaPoints > 100) {
+      return { ok: false, reason: 'draft_impact deltaPoints must be an integer from -100 to 100' };
+    }
+    if (impact.reason !== undefined && typeof impact.reason !== 'string') {
+      return { ok: false, reason: 'draft_impact reason must be a string' };
+    }
+    if (!Array.isArray(impact.archetypes) || impact.archetypes.length !== DRAFT_ARCHETYPE_IDS.length) {
+      return { ok: false, reason: 'draft_impact archetypes must contain exactly four entries' };
+    }
+    for (let index = 0; index < DRAFT_ARCHETYPE_IDS.length; index += 1) {
+      const archetype = impact.archetypes[index];
+      if (!archetype || archetype.id !== DRAFT_ARCHETYPE_IDS[index]) {
+        return { ok: false, reason: 'draft_impact archetype IDs must use the fixed order' };
+      }
+      if (!Number.isInteger(archetype.deltaPoints)
+        || archetype.deltaPoints < -100 || archetype.deltaPoints > 100) {
+        return { ok: false, reason: 'archetype deltaPoints must be an integer from -100 to 100' };
+      }
+      if (archetype.reason !== undefined && typeof archetype.reason !== 'string') {
+        return { ok: false, reason: 'archetype reason must be a string' };
+      }
+      if (archetype.beforeScore !== undefined
+        && (!Number.isInteger(archetype.beforeScore) || archetype.beforeScore < 0 || archetype.beforeScore > 100)) {
+        return { ok: false, reason: 'archetype beforeScore must be an integer from 0 to 100' };
+      }
+      if (archetype.started !== undefined && typeof archetype.started !== 'boolean') {
+        return { ok: false, reason: 'archetype started must be a boolean' };
+      }
+    }
+    if (impact.deltaPoints !== impact.archetypes[0].deltaPoints) {
+      return { ok: false, reason: 'legacy deltaPoints must match auto_strike' };
+    }
+  }
+  return { ok: true };
+}
+
+module.exports = {
+  DRAFT_ARCHETYPE_IDS,
+  SUPPORTED_EVENTS,
+  SUPPORTED_SCHEMA,
+  validateCardSnapshot,
+  validateDraftImpactMessage,
+  validateShop,
+  validateMessage,
+  validateState,
+  stateSignature
+};

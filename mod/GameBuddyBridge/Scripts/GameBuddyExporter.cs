@@ -402,9 +402,11 @@ public static class GameBuddyExporter
         }
 
         _lastCardRewardSignature = signature;
+        GameBuddyRewardOverlay.SetOffer((MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardRewardSelectionScreen)screen, signature, mapped.Select(card => card.Id));
         PublishEvent("card.reward.opened", new
         {
             cards = mapped,
+            signature,
             canSkip = true,
             source = "combat",
             context = new
@@ -935,12 +937,38 @@ public static class GameBuddyExporter
     private static EnemySnapshot MapEnemy(Creature enemy)
     {
         var intent = "none";
-        if (enemy.IsMonster && enemy.Monster?.NextMove is not null)
+        var intentKinds = new List<string>();
+        string? nextMoveId = null;
+        string? nextMoveName = null;
+        if (enemy.IsMonster && enemy.Monster?.NextMove is { } nextMove)
         {
-            intent = string.Join(" | ", enemy.Monster.NextMove.Intents.Select(item => item.GetType().Name));
+            intent = string.Join(" | ", nextMove.Intents.Select(item => item.GetType().Name));
+            intentKinds = nextMove.Intents
+                .Select(item => NormalizeIntentKind(item.GetType().Name))
+                .Where(kind => kind is not null)
+                .Cast<string>()
+                .Distinct()
+                .ToList();
+            // NextMove metadata varies between early-access builds. Read it best-effort,
+            // and leave fields null rather than guessing a move from the intent.
+            nextMoveId = ReadTextMember(nextMove, "MoveId", "MoveID", "Id", "ActionId");
+            nextMoveName = ReadTextMember(nextMove, "MoveName", "DisplayName", "Title", "Name");
         }
 
-        return new EnemySnapshot(enemy.Monster?.Id.Entry, enemy.Name, enemy.CurrentHp, enemy.MaxHp, enemy.Block, intent, enemy.IsAlive);
+        return new EnemySnapshot(enemy.Monster?.Id.Entry, enemy.Name, enemy.CurrentHp, enemy.MaxHp, enemy.Block, intent, intentKinds, enemy.IsAlive, nextMoveId, nextMoveName);
+    }
+
+    private static string? NormalizeIntentKind(string typeName)
+    {
+        var value = typeName.ToLowerInvariant();
+        if (value.Contains("heal")) return "heal";
+        if (value.Contains("attack") || value.Contains("deathblow")) return "attack";
+        if (value.Contains("carddebuff") || value.Contains("debuff")) return "debuff";
+        if (value.Contains("status")) return "status";
+        if (value.Contains("buff")) return "buff";
+        if (value.Contains("defend") || value.Contains("block")) return "defend";
+        if (value.Contains("summon")) return "summon";
+        return null;
     }
 }
 
@@ -953,7 +981,7 @@ public sealed record EventOptionSnapshot(int Index, string Label, string Descrip
 public sealed record RunSnapshot(int Act, int Floor, string? Room, string Character, int TotalFloor, string? CurrentNode, string? CurrentCoord, string ActId, string ActName, string? NextBossId, string? NextBoss, string? SecondBossId, string? SecondBoss);
 public sealed record PlayerSnapshot(int Hp, int MaxHp, int Block, int Gold, int Energy, int MaxEnergy, List<CardSnapshot> Cards, List<OwnedItemSnapshot> Relics, List<OwnedItemSnapshot> Potions, int? MaxPotionSlots);
 public sealed record CombatSnapshot(int Turn, List<CardSnapshot> Hand, List<CardSnapshot> DrawPile, List<CardSnapshot> DiscardPile, List<CardSnapshot> ExhaustPile, List<EnemySnapshot> Enemies);
-public sealed record EnemySnapshot(string? Id, string Name, int Hp, int MaxHp, int Block, string? Intent, bool Alive);
+public sealed record EnemySnapshot(string? Id, string Name, int Hp, int MaxHp, int Block, string? Intent, List<string> IntentKinds, bool Alive, string? NextMoveId, string? NextMoveName);
 public sealed record CardSnapshot(
     string Id,
     string Name,
@@ -1063,6 +1091,10 @@ internal sealed class GameBuddyWebSocketServer
                 if (message.Contains("request_snapshot", StringComparison.Ordinal))
                 {
                     if (_lastStateFrame is not null) await SendAsync(client, _lastStateFrame, cancellationToken);
+                }
+                else
+                {
+                    GameBuddyRewardOverlay.QueueImpactMessage(message);
                 }
             }
         }
