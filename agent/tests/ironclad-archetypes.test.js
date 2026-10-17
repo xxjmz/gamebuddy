@@ -115,16 +115,80 @@ test('起手和缺闸门组件保留潜力但不误报启动', () => {
   }
 });
 
+test('四套只有补齐最小闭环才能跨过 60 点启动线', () => {
+  const cases = {
+    auto_strike: {
+      incomplete: deckOf('HELLRAISER', ...Array(9).fill('MANGLE')),
+      complete: deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE'))
+    },
+    exhaust: {
+      incomplete: deckOf('FEEL_NO_PAIN', ...Array(9).fill('MANGLE')),
+      complete: deckOf('FEEL_NO_PAIN', 'BURNING_PACT', ...Array(8).fill('MANGLE'))
+    },
+    strength: {
+      incomplete: deckOf('INFLAME', ...Array(9).fill('MANGLE')),
+      complete: deckOf('INFLAME', 'TWIN_STRIKE', ...Array(8).fill('MANGLE'))
+    },
+    block: {
+      incomplete: deckOf('BARRICADE', 'IMPERVIOUS', ...Array(8).fill('MANGLE')),
+      complete: deckOf('BARRICADE', 'BODY_SLAM', 'IMPERVIOUS', ...Array(7).fill('MANGLE'))
+    }
+  };
+  for (const [id, decks] of Object.entries(cases)) {
+    const incomplete = state(decks.incomplete, id);
+    const complete = state(decks.complete, id);
+    assert.ok(incomplete.score <= 59, `${id} incomplete ${incomplete.score}`);
+    assert.equal(incomplete.stage, 'unformed', `${id} incomplete stage`);
+    assert.ok(complete.score >= 60 && complete.score < 85, `${id} complete ${complete.score}`);
+    assert.equal(complete.stage, 'started', `${id} complete stage`);
+  }
+});
+
+test('60 点后由理想覆盖与稳定性拉开，85 点以上才可成型', () => {
+  for (const archetype of ARCHETYPES) {
+    const result = state(focusedDecks[archetype.id], archetype.id);
+    assert.ok(result.score >= 85 && result.score < 100, `${archetype.id} focused ${result.score}`);
+    assert.equal(result.stage, 'formed');
+    assert.ok(result.consistency >= 60);
+  }
+});
+
+test('中性过渡牌只影响闭环稳定性，反协同仍降低蓝图覆盖', () => {
+  const compact = deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE'));
+  const thick = [...compact, ...neutral(20)];
+  const compactState = state(compact, 'auto_strike');
+  const thickState = state(thick, 'auto_strike');
+  assert.equal(thickState.blueprintScore, compactState.blueprintScore);
+  assert.ok(thickState.consistency < compactState.consistency);
+  assert.ok(thickState.score < compactState.score);
+
+  const withNeutral = state([...compact, { id: 'MANGLE' }], 'auto_strike');
+  const withConflict = state([...compact, { id: 'ANGER' }], 'auto_strike');
+  assert.ok(withConflict.blueprintScore < withNeutral.blueprintScore);
+});
+
+test('混合牌组可以独立启动多套闭环', () => {
+  const mixed = deckOf(
+    'FEEL_NO_PAIN', 'BURNING_PACT',
+    'INFLAME', 'TWIN_STRIKE',
+    ...Array(6).fill('MANGLE')
+  );
+  const results = scoreIroncladArchetypes(mixed);
+  assert.equal(results.find(item => item.id === 'exhaust').stage, 'started');
+  assert.equal(results.find(item => item.id === 'strength').stage, 'started');
+});
+
 test('升级有效张数更高、重复边际递减且厚牌降低 setup', () => {
   const base = [{ id: 'HELLRAISER' }, ...filler(18)];
   const normal = impact(base, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const upgraded = impact(base, { id: 'POMMEL_STRIKE', upgraded: true }, 'auto_strike').deltaPoints;
   const once = [...base, { id: 'POMMEL_STRIKE' }];
+  const upgraded = impact(neutral(10), { id: 'POMMEL_STRIKE', upgraded: true }, 'auto_strike').deltaPoints;
+  const potentialNormal = impact(neutral(10), { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
   const twice = [...once, { id: 'POMMEL_STRIKE' }];
   const first = normal;
   const second = impact(once, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
   const third = impact(twice, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  assert.ok(upgraded > normal);
+  assert.ok(upgraded > potentialNormal);
   assert.ok(first > second && second > third);
   assert.ok(score([...once, ...filler(12)], 'auto_strike') < score(once, 'auto_strike'));
   assert.deepEqual(scoreIroncladArchetypes(base, []).map(item => item.id), ARCHETYPES.map(item => item.id));
@@ -184,7 +248,10 @@ test('消耗出口、事件和兑现无闸门仍正向，双闸门逐级放大',
     const two = impact(twoGates, { id }, 'exhaust').deltaPoints;
     assert.ok(none > 0, `${id} should retain potential without gates`);
     assert.ok(one >= none, `${id} should not lose value with one gate`);
-    assert.ok(two > one, `${id} should gain value with both gates`);
+    assert.ok(
+      impact(twoGates, { id }, 'exhaust').afterScore > impact(oneGate, { id }, 'exhaust').afterScore,
+      `${id} should finish higher with both gates`
+    );
   }
   assert.equal(state([
     { id: 'BURNING_PACT' }, { id: 'FIEND_FIRE' }, { id: 'PACTS_END' }, ...neutral(7)
@@ -293,8 +360,8 @@ test('叠卡轴放慢而单卡槽仍由第一张完成', () => {
   assert.ok(secondPommel > 0 && secondPommel >= firstPommel * 0.45, `second pommel ${secondPommel}`);
   assert.ok(firstHellraiser > firstPommel, `hellraiser ${firstHellraiser}`);
   assert.ok(secondHellraiser <= firstHellraiser * 0.4, `second hellraiser ${secondHellraiser}`);
-  assert.ok(pommelAfterGate > firstPommel, `pommel after gate ${pommelAfterGate}`);
-  assert.ok(pillageAfterLoop >= 8, `pillage ${pillageAfterLoop}`);
+  assert.ok(pommelAfterGate > 0 && pommelAfterGate < firstPommel, `pommel after activation ${pommelAfterGate}`);
+  assert.ok(pillageAfterLoop > 0, `pillage ${pillageAfterLoop}`);
 
   const stacks = [
     ['BURNING_PACT', 'exhaust', deck => deck],
@@ -305,7 +372,7 @@ test('叠卡轴放慢而单卡槽仍由第一张完成', () => {
     const base = prepare(neutral(10));
     const first = impact(base, { id }, archetype).deltaPoints;
     const second = impact([...base, { id }], { id }, archetype).deltaPoints;
-    assert.ok(second > 0 && second >= first * 0.45, `${id} second ${second} first ${first}`);
+    assert.ok(second > 0 && second < first, `${id} second ${second} first ${first}`);
   }
 
   for (const [id, archetype] of [

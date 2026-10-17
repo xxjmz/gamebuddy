@@ -235,8 +235,8 @@ const CONFIG = Object.freeze({
     gates: ['auto_gate'],
     direct: ['auto_gate', 'auto_loop', 'auto_payoff', 'auto_ammo'],
     peripheral: ['auto_support'],
-    started: ['auto_gate', ['auto_loop', 'auto_payoff', 'auto_ammo']],
-    mature: ['auto_gate', 'auto_loop', 'auto_payoff', 'auto_ammo'],
+    coreLoop: ['auto_gate', ['auto_loop', 'auto_payoff', 'auto_ammo']],
+    ideal: ['auto_gate', 'auto_loop', 'auto_payoff', 'auto_ammo'],
     synergies: [
       { groups: ['auto_gate', 'auto_loop'], maximum: 4 },
       { groups: ['auto_gate', 'auto_ammo'], maximum: 4 },
@@ -251,8 +251,8 @@ const CONFIG = Object.freeze({
     gates: ['exhaust_pain', 'exhaust_draw'],
     direct: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet', 'exhaust_event', 'exhaust_payoff'],
     peripheral: ['exhaust_support'],
-    started: [['exhaust_pain', 'exhaust_draw'], ['exhaust_outlet', 'exhaust_event']],
-    mature: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet', ['exhaust_event', 'exhaust_payoff']],
+    coreLoop: [['exhaust_pain', 'exhaust_draw'], ['exhaust_outlet', 'exhaust_event']],
+    ideal: ['exhaust_pain', 'exhaust_draw', 'exhaust_outlet', ['exhaust_event', 'exhaust_payoff']],
     synergies: [
       { groups: ['exhaust_pain', 'exhaust_outlet'], maximum: 3 },
       { groups: ['exhaust_draw', 'exhaust_event'], maximum: 3 },
@@ -267,8 +267,8 @@ const CONFIG = Object.freeze({
     gates: ['strength_source'],
     direct: ['strength_source', 'strength_multihit', 'strength_balance'],
     peripheral: ['strength_throughput'],
-    started: ['strength_source', ['strength_multihit', 'strength_balance']],
-    mature: ['strength_source', ['strength_multihit', 'strength_balance'], 'strength_throughput'],
+    coreLoop: ['strength_source', ['strength_multihit', 'strength_balance']],
+    ideal: ['strength_source', ['strength_multihit', 'strength_balance'], 'strength_throughput'],
     synergies: [
       { groups: ['strength_source', 'strength_multihit'], maximum: 8 },
       { groups: ['strength_source', 'strength_balance'], maximum: 3 }
@@ -282,8 +282,8 @@ const CONFIG = Object.freeze({
     gates: ['block_gate'],
     direct: ['block_gate', 'block_conversion', 'block_source'],
     peripheral: ['block_support'],
-    started: ['block_gate', 'block_source'],
-    mature: ['block_gate', 'block_conversion', 'block_source'],
+    coreLoop: ['block_gate', 'block_conversion', 'block_source'],
+    ideal: ['block_gate', 'block_conversion', 'block_source'],
     synergies: [
       { groups: ['block_gate', 'block_source'], maximum: 5 },
       { groups: ['block_gate', 'block_conversion'], maximum: 4 },
@@ -383,10 +383,6 @@ function noCopiesInDraw(deckSize, copies, draws) {
     probability *= (deckSize - copies - index) / (deckSize - index);
   }
   return probability;
-}
-
-function setupReliability(context, key, groups, extraDraw = 0) {
-  return requirementReliability(context, key, groups, extraDraw);
 }
 
 function requirementReliability(context, key, requirements, extraDraw = 0) {
@@ -491,8 +487,10 @@ function scoreOneDetailed(key, deck, relics = []) {
     if (relicSet.has(id)) relevantRelics += value;
   }
   const extraDraw = relicSet.has('BAG_OF_PREPARATION') ? 2 : 0;
-  const setup = setupReliability(context, key, config.setup, extraDraw);
-  let synergyCompletion = config.setupMax * setup * stackFullness(context, key, config.setup);
+  const setupComplete = axesSatisfied(context, key, config.setup);
+  let synergyCompletion = config.setupMax
+    * (setupComplete ? 1 : 0)
+    * stackFullness(context, key, config.setup);
   for (const synergy of config.synergies) {
     if (synergy.groups.every(group => hasGroup(context, key, group))) {
       const weakestAxis = Math.min(...synergy.groups.map(group => context.groups.get(`${key}:${group}`) || 0));
@@ -501,14 +499,24 @@ function scoreOneDetailed(key, deck, relics = []) {
   }
   const blueprintScore = Math.max(0, Math.min(100,
     baseAxisCoverage + gateCoverage + synergyCompletion + relevantRelics - antiSynergy));
-  const potentialFloor = 0.35;
-  const formationFactor = potentialFloor + (1 - potentialFloor) * setup;
-  const raw = Math.max(0, Math.min(100, blueprintScore * formationFactor));
+  const coreClosed = axesSatisfied(context, key, config.coreLoop);
+  const coreConsistency = requirementReliability(context, key, config.coreLoop, extraDraw);
+  const idealConsistency = requirementReliability(context, key, config.ideal, extraDraw);
+  const blueprintRatio = blueprintScore / 100;
+  const idealCoverage = blueprintRatio * blueprintRatio;
+  const reliableCoverage = coreConsistency * Math.sqrt(blueprintRatio);
+  const raw = coreClosed
+    ? Math.max(60, Math.min(100, 60 + (25 * idealCoverage) + (15 * reliableCoverage)))
+    : Math.max(0, Math.min(59, blueprintScore));
   const dilution = blueprintScore - raw;
   return {
     raw,
     context,
-    consistency: setup,
+    consistency: coreConsistency,
+    idealConsistency,
+    idealCoverage,
+    reliableCoverage,
+    coreClosed,
     blueprintScore,
     extraDraw,
     components: {
@@ -531,24 +539,10 @@ function scoreIroncladArchetypes(deck, relics = []) {
     const detail = scoreOneDetailed(archetype.key, deck, relics);
     const score = Math.round(detail.raw);
     const config = CONFIG[archetype.key];
-    const startedConsistency = requirementReliability(
-      detail.context,
-      archetype.key,
-      config.started,
-      detail.extraDraw
-    );
-    const formedConsistency = requirementReliability(
-      detail.context,
-      archetype.key,
-      config.mature,
-      detail.extraDraw
-    );
-    const started = score >= 15
-      && startedConsistency >= 0.25
-      && axesSatisfied(detail.context, archetype.key, config.started);
-    const mature = score >= 65
-      && formedConsistency >= 0.6
-      && axesSatisfied(detail.context, archetype.key, config.mature);
+    const started = score >= 60 && detail.coreClosed;
+    const mature = score >= 85
+      && detail.consistency >= 0.6
+      && axesSatisfied(detail.context, archetype.key, config.ideal);
     return {
       id: archetype.id,
       name: archetype.name,
@@ -583,7 +577,10 @@ function impactIroncladArchetypes(deck, relics = [], candidate) {
     const config = CONFIG[archetype.key];
     const firstDirectComponent = config.direct.includes(cell.group)
       && !hasGroup(beforeContext, archetype.key, cell.group);
-    if (rawDelta > 0 && deltaPoints === 0 && firstDirectComponent) deltaPoints = 1;
+    const firstExplicitComponent = cell.role !== 'neutral'
+      && cell.weight > 0
+      && !hasGroup(beforeContext, archetype.key, cell.group);
+    if (rawDelta > 0 && deltaPoints === 0 && (firstDirectComponent || firstExplicitComponent)) deltaPoints = 1;
     if (rawDelta < 0 && deltaPoints === 0 && cell.weight < 0) deltaPoints = -1;
     if (Object.is(deltaPoints, -0)) deltaPoints = 0;
     return {

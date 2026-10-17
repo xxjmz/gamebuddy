@@ -31,10 +31,16 @@ test('重复剑柄打击的流派增量递减，并与地狱狂徒形成协同',
 test('升级、遗物和牌组厚度改变同一候选的增量', () => {
   const base = [hellraiser, pommel, ...Array(18).fill(defend)];
   const normal = autoStrikeImpact(base, [], pommel).deltaPoints;
-  const upgraded = autoStrikeImpact(base, [], { ...pommel, name: '剑柄打击+', upgraded: true }).deltaPoints;
+  const potentialBase = Array(10).fill({ id: 'MANGLE' });
+  const potentialNormal = autoStrikeImpact(potentialBase, [], pommel).deltaPoints;
+  const upgraded = autoStrikeImpact(
+    potentialBase,
+    [],
+    { ...pommel, name: '剑柄打击+', upgraded: true }
+  ).deltaPoints;
   const withRelic = autoStrikeImpact(base, [{ id: 'STRIKE_DUMMY' }], pommel).deltaPoints;
   const thicker = autoStrikeScore([...base, ...Array(10).fill(defend)], []);
-  assert.ok(upgraded > normal);
+  assert.ok(upgraded > potentialNormal);
   assert.ok(withRelic >= normal);
   assert.ok(thicker < autoStrikeScore(base, []));
 });
@@ -90,7 +96,8 @@ test('原始奖励事件可在推荐完成前显示三张牌的增量', () => {
   const decorated = decorateAutoStrikeCards('ironclad', deck, [], offered);
   assert.equal(decorated.length, 3);
   assert.ok(decorated.every(card => card.archetypeImpact?.id === 'auto_strike'));
-  assert.ok(decorated[0].archetypeImpact.deltaPoints > decorated[1].archetypeImpact.deltaPoints);
+  assert.ok(decorated[0].archetypeImpact.afterScore >= decorated[1].archetypeImpact.afterScore);
+  assert.ok(decorated.slice(0, 2).every(card => card.archetypeImpact.afterStage === 'started'));
   assert.equal(offered[0].archetypeImpact, undefined);
   assert.equal(decorateAutoStrikeCards('silent', deck, [], offered), offered);
   const event = { name: 'card.reward.opened', data: { signature: 'POMMEL_STRIKE:False|PILLAGE:False|ANGER:False' } };
