@@ -146,4 +146,30 @@ Assert(selection.Observe(upgradedCandidateDeck) is null
     && selection.Observe(upgradedCandidateDeck)?.Upgraded == true,
     "Candidate identity must include upgraded state.");
 
+static RewardCandidateProbe Probe(
+    string id,
+    bool hovered = false,
+    bool focused = false,
+    bool contains = false,
+    float distance = 0) => new(id, hovered, focused, contains, distance);
+
+Assert(GameBuddyRewardCandidateSelector.Resolve([
+    Probe("LEFT", hovered: true, distance: 40),
+    Probe("RIGHT", hovered: true, distance: 10)
+], "LEFT") == "RIGHT", "Overlapping explicit hover must choose the nearest card center.");
+Assert(GameBuddyRewardCandidateSelector.Resolve([
+    Probe("LEFT", focused: true, distance: 5),
+    Probe("RIGHT", contains: true, distance: 1)
+], "RIGHT") == "LEFT", "Keyboard focus must outrank geometric fallback and last click.");
+Assert(GameBuddyRewardCandidateSelector.Resolve([
+    Probe("LEFT"),
+    Probe("RIGHT", contains: true, distance: 3)
+], "LEFT") == "RIGHT", "Exact pointer geometry must act as hover fallback.");
+Assert(GameBuddyRewardCandidateSelector.Resolve([
+    Probe("LEFT"),
+    Probe("RIGHT")
+], "LEFT") == "LEFT", "The last click must remain selected when no card is hovered or focused.");
+Assert(GameBuddyRewardCandidateSelector.Resolve([Probe("LEFT"), Probe("RIGHT")], null) is null,
+    "No hover, focus, or click must resolve to no candidate.");
+
 Console.WriteLine("GameBuddy reward impact codec tests passed.");

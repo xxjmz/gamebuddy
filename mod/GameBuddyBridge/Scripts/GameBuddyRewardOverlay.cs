@@ -15,6 +15,11 @@ internal static class GameBuddyRewardOverlay
         public Control Target { get; set; } = null!;
         public void Enter() => SetHovered(CardId);
         public void Exit() => ClearHovered(CardId);
+        public void Input(InputEvent input)
+        {
+            if (input is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true })
+                SetClicked(CardId);
+        }
     }
 
     private sealed class ScoreRow
@@ -51,6 +56,8 @@ internal static class GameBuddyRewardOverlay
     private static readonly List<Label> _labels = new();
     private static string _signature = string.Empty;
     private static string? _hoveredCardId;
+    private static string? _lastClickedCardId;
+    private static readonly HashSet<string> ExplicitHoveredCardIds = new(StringComparer.OrdinalIgnoreCase);
     private static HashSet<string> _candidateIds = new(StringComparer.OrdinalIgnoreCase);
     private static IReadOnlyDictionary<string, DraftCardImpact>? _impacts;
     private static NCardHolder[] _holders = [];
@@ -130,44 +137,44 @@ internal static class GameBuddyRewardOverlay
 
     private static void UpdateHoveredFromMouse(NCardHolder[] holders)
     {
-        string? focused = null;
-        string? geometric = null;
+        var probes = new List<RewardCandidateProbe>();
         foreach (var holder in holders)
         {
             var cardId = holder.CardModel?.Id.Entry;
             if (cardId is null) continue;
             var hitbox = holder.Hitbox;
-            if (hitbox is not null && GodotObject.IsInstanceValid(hitbox))
-            {
-                if (hitbox.HasFocus()) focused = cardId;
-                if (ContainsMouse(hitbox)) geometric = cardId;
-            }
-            if (holder.CardNode is Control cardNode && ContainsMouse(cardNode)) geometric = cardId;
+            var cardControl = holder.CardNode as Control;
+            var target = hitbox is not null && GodotObject.IsInstanceValid(hitbox) ? hitbox : cardControl ?? holder;
+            if (!GodotObject.IsInstanceValid(target) || !target.IsVisibleInTree()) continue;
+            var mouse = target.GetGlobalMousePosition();
+            var rect = target.GetGlobalRect();
+            var center = rect.GetCenter();
+            probes.Add(new RewardCandidateProbe(
+                cardId,
+                ExplicitHoveredCardIds.Contains(cardId),
+                target.HasFocus() || (cardControl is not null && cardControl.HasFocus()),
+                rect.HasPoint(mouse) || (cardControl is not null && cardControl.GetGlobalRect().HasPoint(mouse)),
+                mouse.DistanceSquaredTo(center)));
         }
-        var hit = focused ?? geometric;
+        var hit = GameBuddyRewardCandidateSelector.Resolve(probes, _lastClickedCardId);
         if (string.Equals(_hoveredCardId, hit, StringComparison.OrdinalIgnoreCase)) return;
         _hoveredCardId = hit;
         RefreshRows();
     }
 
-    private static bool ContainsMouse(Control control)
-    {
-        if (!GodotObject.IsInstanceValid(control) || !control.IsVisibleInTree()) return false;
-        return control.GetGlobalRect().Grow(24f).HasPoint(control.GetGlobalMousePosition());
-    }
-
     private static void SetHovered(string cardId)
     {
-        if (string.Equals(_hoveredCardId, cardId, StringComparison.OrdinalIgnoreCase)) return;
-        _hoveredCardId = cardId;
-        RefreshRows();
+        ExplicitHoveredCardIds.Add(cardId);
     }
 
     private static void ClearHovered(string cardId)
     {
-        if (!string.Equals(_hoveredCardId, cardId, StringComparison.OrdinalIgnoreCase)) return;
-        _hoveredCardId = null;
-        RefreshRows();
+        ExplicitHoveredCardIds.Remove(cardId);
+    }
+
+    private static void SetClicked(string cardId)
+    {
+        _lastClickedCardId = cardId;
     }
 
     private static void ShowImpacts(Node screen, IReadOnlyDictionary<string, DraftCardImpact> impacts)
@@ -188,6 +195,7 @@ internal static class GameBuddyRewardOverlay
             var target = holder.Hitbox is Control hitbox && GodotObject.IsInstanceValid(hitbox) ? hitbox : holder;
             target.MouseEntered += link.Enter;
             target.MouseExited += link.Exit;
+            target.GuiInput += link.Input;
             link.Target = target;
             Links.Add(link);
         }
@@ -418,11 +426,14 @@ internal static class GameBuddyRewardOverlay
             if (!GodotObject.IsInstanceValid(link.Target)) continue;
             link.Target.MouseEntered -= link.Enter;
             link.Target.MouseExited -= link.Exit;
+            link.Target.GuiInput -= link.Input;
         }
         Links.Clear();
         Rows.Clear();
         _labels.Clear();
         _hoveredCardId = null;
+        _lastClickedCardId = null;
+        ExplicitHoveredCardIds.Clear();
         _impacts = null;
         _holders = [];
         _stateLabel = null;
