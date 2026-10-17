@@ -47,6 +47,28 @@ test('全是纯稀释时只显示当前最高流派的一条', () => {
   assert.deepEqual(selected.map(item => item.id), ['exhaust']);
 });
 
+test('铜铁面板显示四套当前分，候选同时给出当前百分比和变化', () => {
+  const overview = renderOverview(scores);
+  assert.match(overview, /archetype-iron-plate/);
+  assert.match(overview, /流派度≠胜率/);
+  assert.match(overview, /主流派 · 消耗引擎/);
+  for (const item of scores) {
+    assert.match(overview, new RegExp(item.name));
+    assert.match(overview, new RegExp(`>${item.score}<`));
+  }
+  const positive = renderCardImpacts([
+    { id: 'exhaust', name: '消耗引擎', beforeScore: 42, deltaPoints: 3, explicit: true, reason: '出口' }
+  ], scores);
+  const negative = renderCardImpacts([
+    { id: 'strength', name: '力量叠加', beforeScore: 18, deltaPoints: -2, explicit: true, reason: '稀释' }
+  ], scores);
+  assert.match(positive, /消耗引擎 42% \+3/);
+  assert.match(positive, /archetype-impact positive/);
+  assert.doesNotMatch(positive, /45%/);
+  assert.match(negative, /力量叠加 18% -2/);
+  assert.match(negative, /archetype-impact negative/);
+});
+
 test('流派 HTML 输出转义名称和原因', () => {
   const hostile = '<img src=x onerror="boom">&\'';
   assert.equal(escapeHtml(hostile), '&lt;img src=x onerror=&quot;boom&quot;&gt;&amp;&#39;');

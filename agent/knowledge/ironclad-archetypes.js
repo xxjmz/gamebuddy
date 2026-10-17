@@ -398,9 +398,22 @@ function setupReliability(context, key, groups, extraDraw = 0) {
   return counts.reduce((product, count) => product * (1 - noCopiesInDraw(context.size, count, draws)), 1);
 }
 
-function saturated(maximum, amount) {
+const STACK_GROUPS = new Set([
+  'auto_loop', 'exhaust_outlet', 'exhaust_event', 'strength_multihit', 'block_source'
+]);
+const STACK_SATURATION = 0.45;
+const SLOT_SATURATION = 1.35;
+const STACK_FULL_AT = 2;
+
+function saturated(maximum, amount, rate = SLOT_SATURATION) {
   if (amount <= 0) return 0;
-  return maximum * (1 - Math.exp(-1.35 * amount));
+  return maximum * (1 - Math.exp(-rate * amount));
+}
+
+function stackFullness(context, key, groups) {
+  const stacked = groups.filter(group => STACK_GROUPS.has(group));
+  if (!stacked.length) return 1;
+  return Math.min(...stacked.map(group => Math.min(1, (context.groups.get(`${key}:${group}`) || 0) / STACK_FULL_AT)));
 }
 
 function hasGroup(context, key, group) {
@@ -450,7 +463,7 @@ function scoreOneDetailed(key, deck, relics = []) {
       if (cell.weight >= 0) amount += cell.weight * copy.effective * factor;
       else antiSynergy += Math.abs(cell.weight) * 8 * copy.effective * factor;
     }
-    const coverage = saturated(maximum, amount);
+    const coverage = saturated(maximum, amount, STACK_GROUPS.has(group) ? STACK_SATURATION : SLOT_SATURATION);
     if (config.gates.includes(group)) gateCoverage += coverage;
     else baseAxisCoverage += coverage;
   }
@@ -461,11 +474,11 @@ function scoreOneDetailed(key, deck, relics = []) {
   }
   const extraDraw = relicSet.has('BAG_OF_PREPARATION') ? 2 : 0;
   const setup = setupReliability(context, key, config.setup, extraDraw);
-  let synergyCompletion = config.setupMax * setup;
+  let synergyCompletion = config.setupMax * setup * stackFullness(context, key, config.setup);
   for (const synergy of config.synergies) {
     if (synergy.groups.every(group => hasGroup(context, key, group))) {
       const weakestAxis = Math.min(...synergy.groups.map(group => context.groups.get(`${key}:${group}`) || 0));
-      synergyCompletion += saturated(synergy.maximum, weakestAxis);
+      synergyCompletion += saturated(synergy.maximum, weakestAxis) * stackFullness(context, key, synergy.groups);
     }
   }
   const reliabilityFactor = 0.88 + 0.12 * setup;

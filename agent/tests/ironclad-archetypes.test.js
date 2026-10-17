@@ -148,7 +148,7 @@ test('力量多段无来源仍正向，有来源更高且重复递减', () => {
   const missingSource = state([
     { id: 'TWIN_STRIKE' }, { id: 'WHIRLWIND' }, { id: 'CONFLAGRATION' }, ...neutral(7)
   ], 'strength');
-  assert.ok(missingSource.score > 20, 'missing gate must not hard-cap collected components');
+  assert.ok(missingSource.score > 0, 'missing gate must not erase collected components');
   assert.equal(missingSource.started, false);
   assert.equal(missingSource.mature, false);
 });
@@ -199,6 +199,53 @@ test('候选输出四条 impacts 与四条 scores，非铁甲不装饰', () => {
   assert.equal(decorateIroncladArchetypes('silent', deck, [], candidates), candidates);
   assert.equal(isIronclad('铁甲战士'), true);
   assert.equal(isIronclad('silent'), false);
+});
+
+test('叠卡轴放慢而单卡槽仍由第一张完成', () => {
+  const starter = [
+    ...Array.from({ length: 5 }, () => ({ id: 'STRIKE_IRONCLAD' })),
+    ...filler(4),
+    { id: 'BASH' }
+  ];
+  const firstPommel = impact(starter, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
+  const secondPommel = impact([...starter, { id: 'POMMEL_STRIKE' }], { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
+  const firstHellraiser = impact(starter, { id: 'HELLRAISER' }, 'auto_strike').deltaPoints;
+  const secondHellraiser = impact([...starter, { id: 'HELLRAISER' }], { id: 'HELLRAISER' }, 'auto_strike').deltaPoints;
+  const pommelAfterGate = impact([...starter, { id: 'HELLRAISER' }], { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
+  const pillageAfterLoop = impact(
+    [...starter, { id: 'HELLRAISER' }, { id: 'POMMEL_STRIKE' }],
+    { id: 'PILLAGE' },
+    'auto_strike'
+  ).deltaPoints;
+  assert.ok(firstPommel >= 6 && firstPommel <= 10, `pommel ${firstPommel}`);
+  assert.ok(secondPommel >= 4 && secondPommel < firstPommel, `second pommel ${secondPommel}`);
+  assert.ok(firstHellraiser >= 18 && firstHellraiser > firstPommel, `hellraiser ${firstHellraiser}`);
+  assert.ok(secondHellraiser <= 6, `second hellraiser ${secondHellraiser}`);
+  assert.ok(pommelAfterGate > firstPommel && pommelAfterGate < 22, `pommel after gate ${pommelAfterGate}`);
+  assert.ok(pillageAfterLoop >= 8, `pillage ${pillageAfterLoop}`);
+
+  const stacks = [
+    ['BURNING_PACT', 'exhaust', deck => deck],
+    ['CONFLAGRATION', 'strength', deck => [{ id: 'INFLAME' }, ...deck]],
+    ['IMPERVIOUS', 'block', deck => [{ id: 'BARRICADE' }, ...deck]]
+  ];
+  for (const [id, archetype, prepare] of stacks) {
+    const base = prepare(neutral(10));
+    const first = impact(base, { id }, archetype).deltaPoints;
+    const second = impact([...base, { id }], { id }, archetype).deltaPoints;
+    assert.ok(second > 0 && second >= first * 0.45, `${id} second ${second} first ${first}`);
+  }
+
+  for (const [id, archetype] of [
+    ['HELLRAISER', 'auto_strike'],
+    ['FEEL_NO_PAIN', 'exhaust'],
+    ['INFLAME', 'strength'],
+    ['BARRICADE', 'block']
+  ]) {
+    const first = impact(starter, { id }, archetype).deltaPoints;
+    const second = impact([...starter, { id }], { id }, archetype).deltaPoints;
+    assert.ok(second <= first * 0.4, `${id} second ${second} first ${first}`);
+  }
 });
 
 test('生成文档版本、数量和 ID 与矩阵一致', () => {

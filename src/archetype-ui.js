@@ -59,7 +59,7 @@
       const leader = status.archetypeIds.includes(item.id) ? ' leader' : '';
       return `<div class="archetype-score${leader}"><div><span>${escapeHtml(item.name)}</span><strong>${score}</strong></div><div class="archetype-score-track"><span style="width:${score}%"></span></div></div>`;
     }).join('');
-    return `<section class="archetype-overview"><div class="archetype-overview-head"><strong>铁甲流派度</strong><span class="archetype-build-state ${status.kind}">${escapeHtml(status.label)}</span></div>${rows}<div class="archetype-win-note">流派度≠胜率</div></section>`;
+    return `<section class="archetype-overview archetype-iron-plate"><div class="archetype-overview-head"><strong>铁甲流派度</strong><span class="archetype-build-state ${status.kind}">${escapeHtml(status.label)}</span></div>${rows}<div class="archetype-win-note">流派度≠胜率</div></section>`;
   }
 
   function renderCardImpacts(impacts, scores) {
@@ -67,8 +67,10 @@
     if (!selected.length) return '';
     const rows = selected.map(item => {
       const delta = Math.round(item.deltaPoints);
+      const before = Math.round(Number.isFinite(item.beforeScore) ? item.beforeScore : 0);
       const tone = delta > 0 ? 'positive' : 'negative';
-      return `<div class="archetype-impact ${tone}" title="流派度变化，单位为百分点；流派度≠胜率"><strong>${escapeHtml(item.name)} ${delta > 0 ? '+' : ''}${delta}%</strong><span>${escapeHtml(item.reason)}</span></div>`;
+      const signed = `${delta > 0 ? '+' : ''}${delta}`;
+      return `<div class="archetype-impact ${tone}" title="流派度变化，单位为百分点；流派度≠胜率"><strong>${escapeHtml(item.name)} ${before}% ${signed}</strong><span>${escapeHtml(item.reason)}</span></div>`;
     }).join('');
     return `<div class="archetype-impacts">${rows}</div>`;
   }
