@@ -192,7 +192,7 @@ function applyPose() {
   speech.classList.toggle('has-details', petState.guideReopenAvailable || (petState.cardVisible && !cardExpanded));
   speech.setAttribute('aria-label', petState.guideReopenAvailable
     ? '查看本场敌人攻略'
-    : petState.cardVisible && !cardExpanded ? '展开当前建议的理由' : '打开 GameBuddy 主面板');
+    : petState.cardVisible && !cardExpanded ? '展开当前建议的理由' : 'GameBuddy 状态');
   refreshCardMeta();
 }
 
@@ -491,9 +491,7 @@ speech.addEventListener('click', async () => {
   }
   if (petState.cardVisible && !cardExpanded) {
     setCardExpanded(true);
-    return;
   }
-  window.windowControls?.openMain();
 });
 
 petButton.addEventListener('pointerdown', event => {
@@ -513,11 +511,9 @@ petButton.addEventListener('pointermove', event => {
 
 function finishPetPointer(event) {
   if (!dragState || event.pointerId !== dragState.pointerId) return;
-  const wasDragged = dragState.moved;
   window.windowControls?.endPetDrag();
   if (petButton.hasPointerCapture(event.pointerId)) petButton.releasePointerCapture(event.pointerId);
   dragState = undefined;
-  if (!wasDragged) window.windowControls?.openMain();
 }
 
 petButton.addEventListener('pointerup', finishPetPointer);

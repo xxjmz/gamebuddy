@@ -49,4 +49,120 @@ const unknownAxis = window.GameBuddyReviewUi.render({
 });
 assert.equal((unknownAxis.match(/review-radar-data/g) || []).length, 0);
 
+const hostileName = '打击<script>"&';
+const buildDashboard = {
+  ...dashboard,
+  recentRuns: [
+    {
+      runId: 'alpha"run',
+      character: 'ironclad',
+      result: 'win',
+      bossName: '守护者',
+      floor: 55,
+      maxTurnDamage: 128,
+      deck: [
+        { id: 'STRIKE', name: hostileName, upgraded: false },
+        { id: 'STRIKE', name: hostileName, upgraded: true },
+        { id: 'DEFEND', name: '防御', upgraded: false }
+      ],
+      relics: [{ id: 'ANCHOR', name: '锚<img>' }]
+    },
+    {
+      runId: 'beta',
+      character: 'silent',
+      result: 'loss',
+      bossName: '史莱姆',
+      floor: 17,
+      maxTurnDamage: 40,
+      deck: [{ id: 'DAGGER', name: '匕首雨', upgraded: true }],
+      relics: [{ id: 'RING', name: '蛇戒' }]
+    },
+    {
+      runId: 'empty-build',
+      character: 'defect',
+      result: 'loss',
+      bossName: '守卫',
+      floor: 3,
+      maxTurnDamage: 0,
+      deck: [],
+      relics: []
+    },
+    {
+      runId: 'legacy',
+      character: 'ironclad',
+      result: 'abandoned',
+      bossName: '未知首领',
+      floor: 1,
+      maxTurnDamage: null,
+      deck: null,
+      relics: null
+    }
+  ]
+};
+
+const collapsed = window.GameBuddyReviewUi.render(buildDashboard, null);
+assert.match(collapsed, /role="button"/);
+assert.match(collapsed, /data-run-id="alpha&quot;run"/);
+assert.match(collapsed, /aria-expanded="false"/);
+assert.match(collapsed, /aria-controls="review-run-build-0"/);
+assert.match(collapsed, /aria-controls="review-run-build-1"/);
+assert.doesNotMatch(collapsed, /review-run-build"/);
+assert.doesNotMatch(collapsed, /终局牌组/);
+assert.doesNotMatch(collapsed, /匕首雨/);
+
+const alphaHtml = window.GameBuddyReviewUi.render(buildDashboard, 'alpha"run');
+assert.match(alphaHtml, /data-run-id="alpha&quot;run"[^>]*aria-expanded="true"[^>]*aria-controls="review-run-build-0"/);
+assert.match(alphaHtml, /id="review-run-build-0"/);
+assert.match(alphaHtml, /data-run-id="beta"[^>]*aria-expanded="false"/);
+assert.match(alphaHtml, /终局牌组/);
+assert.match(alphaHtml, /终局遗物/);
+assert.match(alphaHtml, /3 张/);
+assert.match(alphaHtml, /1 件/);
+assert.equal((alphaHtml.match(/review-card-chip/g) || []).length, 3);
+assert.equal((alphaHtml.match(/review-card-upgrade/g) || []).length, 1);
+assert.match(alphaHtml, /打击&lt;script&gt;&quot;&amp;/);
+assert.match(alphaHtml, /锚&lt;img&gt;/);
+assert.doesNotMatch(alphaHtml, /打击<script>/);
+assert.doesNotMatch(alphaHtml, /匕首雨/);
+assert.doesNotMatch(alphaHtml, /蛇戒/);
+assert.doesNotMatch(alphaHtml, /本局没有记录到遗物/);
+assert.doesNotMatch(alphaHtml, /旧记录未包含此数据/);
+
+const betaHtml = window.GameBuddyReviewUi.render(buildDashboard, 'beta');
+assert.match(betaHtml, /匕首雨/);
+assert.match(betaHtml, /蛇戒/);
+assert.match(betaHtml, /aria-label="已升级">\+<\/span>/);
+assert.doesNotMatch(betaHtml, /打击&lt;script&gt;/);
+assert.doesNotMatch(betaHtml, /锚&lt;img&gt;/);
+assert.match(betaHtml, /data-run-id="beta"[^>]*aria-expanded="true"[^>]*aria-controls="review-run-build-1"/);
+assert.match(betaHtml, /id="review-run-build-1"[^>]*data-run-id="beta"/);
+
+const emptyHtml = window.GameBuddyReviewUi.render(buildDashboard, 'empty-build');
+assert.match(emptyHtml, /本局没有记录到牌组/);
+assert.match(emptyHtml, /本局没有记录到遗物/);
+assert.match(emptyHtml, /0 张/);
+assert.match(emptyHtml, /0 件/);
+assert.doesNotMatch(emptyHtml, /旧记录未包含此数据/);
+
+const legacyHtml = window.GameBuddyReviewUi.render(buildDashboard, 'legacy');
+assert.equal((legacyHtml.match(/旧记录未包含此数据/g) || []).length, 2);
+assert.doesNotMatch(legacyHtml, /本局没有记录到牌组/);
+assert.doesNotMatch(legacyHtml, /本局没有记录到遗物/);
+
+const idFallback = window.GameBuddyReviewUi.render({
+  ...buildDashboard,
+  recentRuns: [{
+    runId: 'ids-only',
+    character: 'ironclad',
+    result: 'win',
+    bossName: '守护者',
+    floor: 2,
+    maxTurnDamage: 1,
+    deck: [{ id: 'STRIKE_R', name: '', upgraded: false }],
+    relics: [{ id: 'BURNING_BLOOD', name: '' }]
+  }]
+}, 'ids-only');
+assert.match(idFallback, /STRIKE_R/);
+assert.match(idFallback, /BURNING_BLOOD/);
+
 console.log('Review UI tests passed.');

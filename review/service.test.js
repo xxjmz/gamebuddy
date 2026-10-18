@@ -32,6 +32,9 @@ assert.equal(dashboard.window.wins, 1);
 assert.equal(dashboard.mainCharacter, 'ironclad');
 assert.equal(dashboard.recentRuns[0].maxTurnDamage, 16);
 assert.equal(dashboard.recentRuns[0].bossName, '守护者');
+assert.equal(dashboard.recentRuns[0].deck.length, 12);
+assert.deepEqual(dashboard.recentRuns[0].deck[0], { id: 'STRIKE', name: 'STRIKE', upgraded: false });
+assert.deepEqual(dashboard.recentRuns[0].relics, []);
 assert.equal(dashboard.axes.find(axis => axis.id === 'attackPlay').value, 100);
 assert.equal(dashboard.stats.find(stat => stat.id === 'campUpgrade').value, 100);
 
@@ -86,6 +89,68 @@ assert.equal(aggregate.stats.find(stat => stat.id === 'winRate').denominator, 1,
 assert.equal(aggregate.axes.every(axis => axis.value >= 0 && axis.value <= 100), true);
 assert.equal(aggregate.axes.find(axis => axis.id === 'attackPlay').value, 100);
 assert.equal(aggregate.axes.find(axis => axis.id === 'eliteChallenge').value, 100);
+
+const builds = buildDashboard({
+  schema: 'gamebuddy.review-history.v1',
+  runs: [
+    {
+      runId: 'alpha',
+      character: 'ironclad',
+      result: 'win',
+      finalState: {
+        deck: [
+          { id: 'STRIKE', name: '打击', upgraded: false },
+          { id: 'STRIKE', name: '打击', IsUpgraded: true },
+          { id: 'DEFEND', Name: '防御', Upgraded: true }
+        ],
+        relics: ['BURNING_BLOOD', { id: 'ANCHOR', name: '锚', description: '开局获得格挡' }]
+      }
+    },
+    {
+      runId: 'empty-build',
+      character: 'silent',
+      result: 'loss',
+      finalState: { deck: [], relics: [] }
+    },
+    {
+      runId: 'legacy',
+      character: 'defect',
+      result: 'abandoned'
+    },
+    {
+      runId: 'partial',
+      character: 'ironclad',
+      result: 'loss',
+      finalState: { gold: 12 }
+    },
+    {
+      runId: 'not-object',
+      character: 'ironclad',
+      result: 'loss',
+      finalState: 'missing'
+    }
+  ]
+});
+const [alpha, emptyBuild, legacy, partial, notObject] = builds.recentRuns;
+assert.deepEqual(alpha.deck, [
+  { id: 'STRIKE', name: '打击', upgraded: false },
+  { id: 'STRIKE', name: '打击', upgraded: true },
+  { id: 'DEFEND', name: '防御', upgraded: true }
+]);
+assert.deepEqual(alpha.relics, [
+  { id: 'BURNING_BLOOD', name: 'BURNING_BLOOD' },
+  { id: 'ANCHOR', name: '锚' }
+]);
+assert.equal('description' in alpha.relics[1], false);
+assert.deepEqual(emptyBuild.deck, []);
+assert.deepEqual(emptyBuild.relics, []);
+for (const run of [legacy, partial, notObject]) {
+  assert.equal(run.deck, null);
+  assert.equal(run.relics, null);
+}
+assert.deepEqual(builds.recentRuns.map(run => run.runId), ['alpha', 'empty-build', 'legacy', 'partial', 'not-object']);
+assert.notDeepEqual(alpha.deck, emptyBuild.deck);
+assert.notDeepEqual(alpha.relics, legacy.relics);
 
 fs.rmSync(directory, { recursive: true, force: true });
 console.log('Review service tests passed.');

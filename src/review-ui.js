@@ -86,24 +86,62 @@
     return ['未通关', 'loss'];
   }
 
-  function recentRuns(runs) {
+  function displayName(item) {
+    const name = String(item?.name || '').trim();
+    const id = String(item?.id || '').trim();
+    return name || id || '未知';
+  }
+
+  function buildCollection(title, items, emptyText, countUnit) {
+    const missing = !Array.isArray(items);
+    const count = missing ? '' : `<span>${items.length} ${countUnit}</span>`;
+    let body;
+    if (missing) body = `<p class="review-build-empty">旧记录未包含此数据</p>`;
+    else if (!items.length) body = `<p class="review-build-empty">${emptyText}</p>`;
+    else if (countUnit === '张') {
+      body = `<div class="review-build-grid">${items.map(card => `
+        <span class="review-card-chip"><span class="review-card-name">${escapeHtml(displayName(card))}</span>${card?.upgraded ? '<span class="review-card-upgrade" aria-label="已升级">+</span>' : ''}</span>`).join('')}</div>`;
+    } else {
+      body = `<div class="review-build-grid">${items.map(relic => `<span class="review-relic-badge">${escapeHtml(displayName(relic))}</span>`).join('')}</div>`;
+    }
+    return `
+      <section class="review-build-section">
+        <div class="review-build-heading"><strong>${title}</strong>${count}</div>
+        ${body}
+      </section>`;
+  }
+
+  function runBuild(run, panelId) {
+    return `
+      <div class="review-run-build" id="${panelId}" role="region" aria-label="终局牌组与遗物" data-run-id="${escapeHtml(run.runId)}">
+        ${buildCollection('终局牌组', run.deck, '本局没有记录到牌组', '张')}
+        ${buildCollection('终局遗物', run.relics, '本局没有记录到遗物', '件')}
+      </div>`;
+  }
+
+  function recentRuns(runs, expandedRunId = null) {
     if (!runs?.length) {
       return `<div class="review-no-runs"><strong>还没有本地对局记录</strong><span>开始一局《杀戮尖塔 2》，GameBuddy 会自动记录到这里。</span></div>`;
     }
-    return runs.map(run => {
+    return runs.map((run, index) => {
       const [label, className] = resultLabel(run.result);
+      const panelId = `review-run-build-${index}`;
+      const expanded = expandedRunId != null && run.runId === expandedRunId;
       return `
-        <article class="review-run-card">
-          <img src="${characterImage(run.character)}" alt="" />
-          <div class="review-run-character"><strong>${escapeHtml(characterName(run.character))}</strong><span class="review-result ${className}">${label}</span></div>
-          <div><span>关底 BOSS</span><strong>${escapeHtml(run.bossName || '未知')}</strong></div>
-          <div><span>最终楼层</span><strong>${Number.isFinite(run.floor) ? `${run.floor} 层` : '未知'}</strong></div>
-          <div><span>最高单回合伤害</span><strong>${Number.isFinite(run.maxTurnDamage) ? run.maxTurnDamage : '未知'}</strong></div>
-        </article>`;
+        <div class="review-run-entry">
+          <div class="review-run-card${expanded ? ' is-expanded' : ''}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${panelId}">
+            <img src="${characterImage(run.character)}" alt="" />
+            <div class="review-run-character"><strong>${escapeHtml(characterName(run.character))}</strong><span class="review-result ${className}">${label}</span></div>
+            <div><span>关底 BOSS</span><strong>${escapeHtml(run.bossName || '未知')}</strong></div>
+            <div><span>最终楼层</span><strong>${Number.isFinite(run.floor) ? `${run.floor} 层` : '未知'}</strong></div>
+            <div><span>最高单回合伤害</span><strong>${Number.isFinite(run.maxTurnDamage) ? run.maxTurnDamage : '未知'}</strong></div>
+          </div>
+          ${expanded ? runBuild(run, panelId) : ''}
+        </div>`;
     }).join('');
   }
 
-  function render(dashboard) {
+  function render(dashboard, expandedRunId = null) {
     const safe = dashboard || { window: {}, axes: [], stats: [], recentRuns: [] };
     const character = safe.mainCharacter || 'ironclad';
     return `
@@ -145,7 +183,7 @@
 
         <section class="review-history">
           <div class="review-history-heading"><strong>最近游戏记录</strong><span>角色 · 通关状态 · BOSS · 楼层 · 单回合伤害</span></div>
-          <div class="review-run-list">${recentRuns(safe.recentRuns)}</div>
+          <div class="review-run-list">${recentRuns(safe.recentRuns, expandedRunId)}</div>
         </section>
       </section>`;
   }

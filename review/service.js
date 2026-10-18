@@ -337,6 +337,49 @@ function buildStats(runs) {
   ];
 }
 
+function displayText(value) {
+  if (typeof value !== 'string' && typeof value !== 'number') return '';
+  return String(value);
+}
+
+function projectCard(card) {
+  if (typeof card === 'string') return { id: card, name: card, upgraded: false };
+  if (!card || typeof card !== 'object') return { id: '', name: '', upgraded: false };
+  const id = displayText(card.id ?? card.Id);
+  const name = displayText(card.name ?? card.Name ?? card.title ?? card.Title) || id;
+  return {
+    id,
+    name,
+    upgraded: Boolean(card.upgraded || card.IsUpgraded || card.Upgraded)
+  };
+}
+
+function projectRelic(relic) {
+  if (typeof relic === 'string') return { id: relic, name: relic };
+  if (!relic || typeof relic !== 'object') return { id: '', name: '' };
+  const id = displayText(relic.id ?? relic.Id);
+  return {
+    id,
+    name: displayText(relic.name ?? relic.Name ?? relic.title ?? relic.Title) || id
+  };
+}
+
+function projectBuildList(value, project) {
+  if (!Array.isArray(value)) return null;
+  return value.map(project);
+}
+
+function projectRunBuild(run) {
+  const finalState = run?.finalState;
+  if (!finalState || typeof finalState !== 'object' || Array.isArray(finalState)) {
+    return { deck: null, relics: null };
+  }
+  return {
+    deck: projectBuildList(finalState.deck, projectCard),
+    relics: projectBuildList(finalState.relics, projectRelic)
+  };
+}
+
 function buildDashboard(history) {
   const all = history.runs.slice(0, DASHBOARD_LIMIT);
   const character = mainCharacter(all);
@@ -363,7 +406,8 @@ function buildDashboard(history) {
       bossName: run.finalBossName || null,
       floor: number(run.finalFloor),
       maxTurnDamage: number(run.maxTurnDamage),
-      endedAt: number(run.endedAt)
+      endedAt: number(run.endedAt),
+      ...projectRunBuild(run)
     })),
     recoveryWarning: history.recoveryWarning || null
   };
