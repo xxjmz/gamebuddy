@@ -1,3 +1,4 @@
+const { decorateIroncladArchetypes } = require('../knowledge/ironclad-archetypes');
 const { SCHEMA } = require('../recommendation');
 const { createSpireCodexClient, normalizeKey, stripMarkup } = require('../knowledge/spire-codex');
 const { lookupRelic, lookupPotion } = require('../codex-db');
@@ -227,7 +228,8 @@ function analyzeItems(shop, state, knowledge) {
     };
     if (item.itemType === 'card') {
       const card = cardByKey.get(normalizeKey(item.id || item.name)) || { ...(item.card || {}), id: item.id, name: item.name, description: item.description };
-      const analysis = analyzeCard(card, state, context, threats, null, tags);
+      const rawAnalysis = analyzeCard(card, state, context, threats, null, tags);
+      const [analysis] = decorateIroncladArchetypes(state.run?.character, state.player?.cards || [], state.player?.relics || [], [rawAnalysis]);
       return { ...base, score: item.price === null ? 0 : priceAdjustedScore(analysis.score + 4, item.price, 'card', item.onSale), analysis: { ...analysis, effect: analysis.description } };
     }
     if (item.itemType === 'relic') {

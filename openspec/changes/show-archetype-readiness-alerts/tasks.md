@@ -23,3 +23,10 @@
 ## 5. 验证
 
 - [x] 5.1 运行 `npm run test:syntax`、`npm run test:agent` 和 `npm run harness:validate-all`，确认推荐排序测试仍然通过，且上述行为用例都在结果中。syntax 与 agent 通过，推荐用例 82 条通过；`harness:validate-all` 停在既有 Mod 标记 `OrderByDescending(card => card.IsUpgraded)`，该字符串在本次改动前的 exporter 里也不存在。
+
+
+## 6. 商店兼容和通知修复
+- [x] 6.1 复现Mod删牌服务的null stockKey导致商店整包拒绝，兼容缺失/null可选键，仍拒绝错误类型/重复索引/非法价格；验证推荐恢复。
+- [x] 6.2 商店关键卡牌/遗物支持新鲜快照进入和重连，按机会对象去重，购买/离场撤销；与推荐链路独立。
+- [x] 6.3 停止将各类普通推荐转为弹幕，保留面板/桌宠推荐以及人格、怪物技能与关键组件通知。
+- [x] 6.4 运行协议、Agent、弹幕和真实renderer商店回放，更新记录，重启源码版应用。

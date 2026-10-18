@@ -103,15 +103,15 @@ Assert(GameBuddyRewardImpactCodec.FormatProgress(42, 0) == "42", "Zero delta sho
 Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(14) == "+14", "Positive delta sign is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatSignedDelta(-2) == "-2", "Negative delta sign is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatReadiness("自动打击流", 72, "missing_starter", true)
-    == "自动打击流：准备度 72 / 尚缺启动组件；已有部分配套",
+    == "自动打击流：契合度 72 / 尚缺启动组件；已有部分配套",
     "Readiness overlay text is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatReadiness("自动打击流", 52, "operational", false)
-    == "自动打击流：准备度 52 / 可以运转",
+    == "自动打击流：契合度 52 / 可以运转",
     "Operational readiness text is incorrect.");
 Assert(GameBuddyRewardImpactCodec.FormatFunctionLine(
     [new DraftFunction("auto_loop", "抽牌循环")],
     [new DraftFunction("auto_gate", "自动打击启动")])
-    == "已有：抽牌循环。尚缺：自动打击启动",
+    == "已有：抽牌循环。待补足：自动打击启动",
     "Function line should show present and missing labels.");
 Assert(GameBuddyRewardImpactCodec.FormatDelta(4, "missing_starter", "operational")
     == " +4 · 尚缺启动组件 → 可以运转",
@@ -393,3 +393,24 @@ identities.End(secondRun);
 Assert(identities.ActiveRunId is null, "An ended run remained active.");
 
 Console.WriteLine("GameBuddy run identity tests passed.");
+
+// 可选地消费由真实 JS 评分器生成的完整 draft_impact，验证新增教学字段。
+if (args.Length > 0)
+{
+    Assert(GameBuddyRewardImpactCodec.TryParse(File.ReadAllText(args[0]), out var affinityMessage),
+        "Actual JS affinity replay must parse in the C# codec.");
+    foreach (var offer in affinityMessage!.Impacts.Values)
+    {
+        foreach (var affinity in offer.Archetypes)
+        {
+            Assert(affinity.DeltaPoints == affinity.AfterScore - affinity.BeforeScore, "Delta differs across languages.");
+            Assert(affinity.BeforeIdentity.HasValue && affinity.AfterIdentity.HasValue, "Identity evidence is missing.");
+            Assert(affinity.ReferenceName is not null && affinity.BeforeReferenceName is not null, "Reference route is missing.");
+            var ownedFunctions = GameBuddyRewardImpactCodec.CurrentFunctions(affinity);
+            Assert(ownedFunctions.Present.SequenceEqual(affinity.BeforePresentFunctions!), "Owned functions came from a candidate.");
+            Assert(ownedFunctions.Missing.SequenceEqual(affinity.BeforeMissingFunctions!), "Owned gaps came from a candidate.");
+        }
+    }
+    Assert(GameBuddyRewardImpactCodec.FormatDelta(0, "operational", "operational") == " 0", "Zero must be visible.");
+    Console.WriteLine("GameBuddy actual JS affinity replay passed.");
+}

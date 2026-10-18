@@ -3,6 +3,9 @@
 const { normalizeCharacter } = require('./language-profile');
 const { extractSceneContext } = require('./scene-context');
 const finite = Number.isFinite;
+const catalog = require('../data/codex/cards.json');
+const cardFacts = new Map(catalog.flatMap(card => [[card.id, card], [card.name, card]]));
+const high = player => finite(player?.hp) && finite(player?.maxHp) && player.maxHp > 0 && player.hp / player.maxHp >= .8;
 const low = player => finite(player?.hp) && finite(player?.maxHp) && player.maxHp > 0 && player.hp > 0 && player.hp / player.maxHp <= 0.25;
 const cardKey = card => String(card?.id || card?.cardId || card?.name || '');
 const enemyType = enemy => String(enemy?.id || enemy?.name || '');
@@ -17,7 +20,7 @@ class RunMemory {
     this.history = []; this.encounters = new Map(); this.moments = [];
     this.seen = new Set(); this.events = new Set(); this.deck = null; this.newCards = new Map();
     this.sceneId = null; this.previous = null; this.playCount = 0; this.playTurn = null;
-    this.buffTurns = new Map(); this.serial = 0; this.wasLow = false;
+    this.buffTurns = new Map(); this.reactionTimes = new Map(); this.reactionSerial = 0; this.serial = 0; this.wasLow = false;
   }
 
   ensure(runId, character) {
@@ -41,6 +44,14 @@ class RunMemory {
     this.remember(kind, text);
   }
 
+  react(kind, text, key, priority = 4, cooldownMs = 8_000) {
+    if (this.now() - (this.reactionTimes.get(kind) ?? -Infinity) < cooldownMs) return;
+    this.reactionTimes.set(kind, this.now());
+    // 同类型只保留最新待消费事实，避免一批两句复述同一类出手。
+    for (const item of this.moments) if (item.kind === kind && !item.claimed) item.claimed = true;
+    this.addMoment(kind, text, key, priority);
+  }
+
   observeDeck(cards) {
     if (!Array.isArray(cards)) return;
     const counts = new Map();
@@ -62,8 +73,9 @@ class RunMemory {
     this.ensure(runId, state.run?.character);
     this.observeDeck(state.player?.cards);
     const context = extractSceneContext({ state });
-    if (entering || (sceneId && sceneId !== this.sceneId)) {
-      this.sceneId = sceneId; this.previous = null; this.playCount = 0; this.playTurn = null; this.buffTurns.clear();
+    const newScene = entering || (sceneId && sceneId !== this.sceneId);
+    if (newScene) {
+      this.sceneId = sceneId; this.previous = null; this.playCount = 0; this.playTurn = null; this.buffTurns.clear(); this.reactionTimes.clear();
       const types = new Set();
       for (const enemy of context.enemies) {
         const type = enemyType(enemy); if (types.has(type)) continue; types.add(type);
@@ -88,6 +100,23 @@ class RunMemory {
       this.remember('recovered', '本局此前曾低生命，现在生命已恢复到一半以上；恢复来源未知。');
     }
     if (!state.combat) { this.previous = null; return; }
+    // 只对连续采样做差分；断线和切场不把缺失过程当成受伤/命中。
+    if (old && finite(old.player?.hp) && finite(state.player?.hp) && state.player.hp > 0 && state.player.hp < old.player.hp) {
+      this.react('player_hurt', `自己的生命从${old.player.hp}降到${state.player.hp}，减少${old.player.hp - state.player.hp}；来源未知。`, `${sceneId}:hurt:${++this.reactionSerial}`, 5);
+    }
+    if ((newScene || old && !high(old.player)) && high(state.player)) {
+      this.react('high_hp', '自己的生命至少为上限的八成，目前体力充足；不能据此预言安全或胜利。', `${sceneId}:high-hp`, 3);
+    }
+    if ((newScene || old && !low(old.player)) && low(state.player)) {
+      this.react('low_hp', '自己的生命不超过上限的四分之一，仍然存活。', `${sceneId}:low-hp`, 5);
+    }
+    if (old) for (const enemy of old.enemies) {
+      const current = state.combat.enemies?.[enemy.slot];
+      if (current?.name !== enemy.name || enemy.id && current.id !== enemy.id) continue;
+      if (finite(enemy.hp) && finite(current.hp) && current.hp >= 0 && current.hp < enemy.hp) {
+        this.react('damage_observed', `观察到${enemy.name}生命从${enemy.hp}降到${current.hp}；伤害来源未知，不能归于某张牌。`, `${sceneId}:damage:${++this.reactionSerial}`, 4);
+      }
+    }
     const turn = context.turn;
     if (turn !== this.playTurn) { this.playTurn = turn; this.playCount = 0; }
     if (old && finite(turn) && turn > old.turn && low(old.player) && state.player.hp > 0) {
@@ -100,7 +129,7 @@ class RunMemory {
       if (enemy.intentKinds.includes('buff') && finite(turn)) {
         const turns = this.buffTurns.get(enemy.key) || new Set();
         turns.add(turn); this.buffTurns.set(enemy.key, turns);
-        if (turns.size >= 2) this.addMoment('repeated_buff', `${enemy.name}在多个回合显示强化意图，具体成长效果未知。`, `${sceneId}:buff:${enemy.key}`, 3);
+        if (turns.size >= 2) this.addMoment('repeated_buff', `${enemy.name}在多个回合显示强化意图，具体成长效果未知。`, `${sceneId}:buff:${enemy.key}`, 2);
       }
     }
     if (old && finite(turn) && turn >= 6) {
@@ -126,6 +155,11 @@ class RunMemory {
     const data = event.data || {};
     const key = data.cardId || data.card?.id;
     const name = event.cardName || data.cardName || data.card?.name;
+    const owned = state.player?.cards?.find(card => card.id === key || card.name === name);
+    const fact = cardFacts.get(String(key || owned?.id || '').replace(/\+$/, '').toUpperCase()) || cardFacts.get(name || owned?.name);
+    if (fact?.type_key === 'Attack') {
+      this.react('attack_played', `刚打出攻击牌「${fact.name}」；只确认出牌，尚未确认命中、伤害或击杀。`, `${this.sceneId}:attack:${event.eventId || ++this.reactionSerial}`, 4);
+    }
     const match = key ? this.newCards.get(key) : [...this.newCards.values()].find(item => item.name === name);
     if (match && !match.played) {
       match.played = true;
@@ -134,12 +168,16 @@ class RunMemory {
   }
 
   pending() {
-    return this.moments.filter(item => item.sceneId === this.sceneId && !item.claimed && this.now() - item.at < 45_000)
+    return this.moments.filter(item => item.sceneId === this.sceneId && !item.claimed && this.now() - item.at < 45_000 && this.validMoment(item.id))
       .sort((a, b) => b.priority - a.priority || b.at - a.at).slice(0, 3);
   }
 
   claim(moments) { for (const item of moments) item.claimed = true; }
-  validMoment(id) { return this.moments.some(item => item.id === id && item.sceneId === this.sceneId && this.now() - item.at < 60_000); }
+  validMoment(id) {
+    return this.moments.some(item => item.id === id && item.sceneId === this.sceneId && this.now() - item.at < 60_000
+      && (item.kind !== 'high_hp' || high(this.previous?.player))
+      && (item.kind !== 'low_hp' || low(this.previous?.player)));
+  }
 
   relevant(state) {
     const result = [];

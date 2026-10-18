@@ -118,99 +118,36 @@ test('起手和缺闸门组件保留潜力但不误报启动', () => {
   }
 });
 
-test('缺启动时未饱和配套仍能超过 59，补齐闭环不把准备度抬到 60', () => {
-  const loopOnly = deckOf(
-    ...Array(8).fill('POMMEL_STRIKE'),
-    ...Array(6).fill('PILLAGE'),
-    ...Array(4).fill('PERFECTED_STRIKE'),
-    ...Array(8).fill('STRIKE_IRONCLAD'),
-    ...Array(4).fill('TWIN_STRIKE'),
-    ...Array(3).fill('SHRUG_IT_OFF'),
-    ...Array(2).fill('OFFERING'),
-    'BASH', 'HEADBUTT', 'BURNING_PACT'
-  );
-  const missing = state(loopOnly, 'auto_strike');
-  const closed = state(deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE')), 'auto_strike');
-  assert.equal(missing.status, 'missing_starter');
-  assert.ok(missing.score > 59, `missing starter readiness ${missing.score}`);
-  assert.equal(missing.stage, 'unformed');
-  assert.match(missing.statusLabel, /尚缺启动组件/);
-  assert.match(missing.statusLabel, /已有部分配套/);
-  assert.equal(closed.status, 'operational');
-  assert.ok(closed.score < 60, `closed loop readiness ${closed.score}`);
-  assert.equal(closed.score, closed.readiness);
-  assert.equal(closed.stage, 'started');
-  assert.equal(closed.started, true);
-  assert.equal(closed.mature, false);
-
-  const onlyGate = state(deckOf('HELLRAISER', ...Array(9).fill('MANGLE')), 'auto_strike');
-  assert.equal(onlyGate.status, 'incomplete_loop');
-  assert.notEqual(onlyGate.status, 'operational');
-  const copies = Array.from({ length: 12 }, () => ({ id: 'POMMEL_STRIKE' }));
-  const stacked = state(copies, 'auto_strike');
-  assert.ok(stacked.score < 100, `stacked loop ${stacked.score}`);
-  assert.ok(score(copies.slice(0, 2), 'auto_strike') - score(copies.slice(0, 1), 'auto_strike')
-    > score(copies, 'auto_strike') - score(copies.slice(0, -1), 'auto_strike'));
+test('缺启动仍按配套连续增长，不应用 59 分上限或启动保底', () => {
+  const { references, expand } = require('../knowledge/archetype-affinity');
+  const withoutGate = expand(references.auto_strike.cards).filter(card => !['HELLRAISER', 'DEFEND_IRONCLAD', 'ASCENDERS_BANE', 'SPITE', 'ANGER'].includes(card.id));
+  const result = state(withoutGate, 'auto_strike');
+  assert.ok(result.score > 59, `${result.score}`);
+  assert.equal(result.status, 'missing_starter');
+  assert.equal(result.started, false);
+  const sparse = state(deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE')), 'auto_strike');
+  assert.equal(sparse.status, 'operational');
+  assert.ok(sparse.score < 60);
 });
 
-test('运转状态看功能，地狱狂徒补齐后可以运转且主宰不能单独充当力量启动', () => {
-  const cases = {
-    auto_strike: {
-      incomplete: deckOf('HELLRAISER', ...Array(9).fill('MANGLE')),
-      complete: deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE'))
-    },
-    exhaust: {
-      incomplete: deckOf('FEEL_NO_PAIN', ...Array(9).fill('MANGLE')),
-      complete: deckOf('FEEL_NO_PAIN', 'BURNING_PACT', ...Array(8).fill('MANGLE'))
-    },
-    strength: {
-      incomplete: deckOf('INFLAME', ...Array(9).fill('MANGLE')),
-      complete: deckOf('INFLAME', 'TWIN_STRIKE', ...Array(8).fill('MANGLE'))
-    },
-    block: {
-      incomplete: deckOf('BARRICADE', 'IMPERVIOUS', ...Array(8).fill('MANGLE')),
-      complete: deckOf('BARRICADE', 'BODY_SLAM', 'IMPERVIOUS', ...Array(7).fill('MANGLE'))
-    }
-  };
-  for (const [id, decks] of Object.entries(cases)) {
-    const incomplete = state(decks.incomplete, id);
-    const complete = state(decks.complete, id);
-    assert.equal(incomplete.status, 'incomplete_loop', `${id} ${incomplete.status}`);
-    assert.equal(incomplete.stage, 'unformed', `${id} incomplete stage`);
-    assert.ok(['operational', 'stable'].includes(complete.status), `${id} ${complete.status}`);
-    assert.notEqual(complete.stage, 'unformed', `${id} complete stage`);
-    assert.equal(complete.score, complete.readiness);
-    if (id !== 'block') {
-      assert.equal(complete.status, 'operational', `${id} ${complete.status} ${complete.score}`);
-      assert.ok(complete.score < 60, `${id} complete readiness ${complete.score}`);
-    }
-  }
-  for (const archetype of ARCHETYPES) {
-    const result = state(focusedDecks[archetype.id], archetype.id);
-    assert.equal(result.status, 'stable', `${archetype.id} ${result.score}`);
-    assert.equal(result.stage, 'formed');
-    assert.ok(result.consistency >= 60);
-    assert.ok(result.score < 100);
-  }
+test('状态解释配合而不抬分，主宰自身提供易伤与力量', () => {
+  const gate = state(deckOf('HELLRAISER', ...Array(9).fill('MANGLE')), 'auto_strike');
+  const linked = state(deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE')), 'auto_strike');
+  assert.equal(gate.status, 'incomplete_loop');
+  assert.equal(linked.status, 'operational');
+  assert.ok(linked.score < 60);
   const dominate = state(deckOf('DOMINATE', ...Array(9).fill('MANGLE')), 'strength');
-  assert.equal(dominate.status, 'missing_starter');
-  assert.equal(dominate.presentFunctions.some(item => item.id === 'strength_source'), false);
-  const enabled = state(deckOf('INFLAME', 'DOMINATE', 'BASH'), 'strength');
-  assert.equal(enabled.presentFunctions.some(item => item.id === 'strength_source'), true);
+  assert.ok(dominate.presentFunctions.some(item => item.id === 'strength_source'));
+  assert.equal(dominate.status, 'incomplete_loop');
 });
 
-test('中性过渡牌只影响闭环稳定性，反协同仍降低蓝图覆盖', () => {
+test('无关牌不改变功能覆盖，但会降低契合度和组件密度', () => {
   const compact = deckOf('HELLRAISER', 'POMMEL_STRIKE', ...Array(8).fill('MANGLE'));
-  const thick = [...compact, ...neutral(20)];
-  const compactState = state(compact, 'auto_strike');
-  const thickState = state(thick, 'auto_strike');
-  assert.equal(thickState.blueprintScore, compactState.blueprintScore);
-  assert.ok(thickState.consistency < compactState.consistency);
-  assert.equal(thickState.readiness, compactState.readiness);
-
-  const withNeutral = state([...compact, { id: 'MANGLE' }], 'auto_strike');
-  const withConflict = state([...compact, { id: 'ANGER' }], 'auto_strike');
-  assert.ok(withConflict.blueprintScore < withNeutral.blueprintScore);
+  const before = state(compact, 'auto_strike');
+  const after = state([...compact, ...neutral(20)], 'auto_strike');
+  assert.equal(after.blueprintScore, before.blueprintScore);
+  assert.ok(after.consistency < before.consistency);
+  assert.ok(after.score < before.score);
 });
 
 test('混合牌组可以独立启动多套闭环', () => {
@@ -224,20 +161,15 @@ test('混合牌组可以独立启动多套闭环', () => {
   assert.equal(results.find(item => item.id === 'strength').stage, 'started');
 });
 
-test('升级有效张数更高、重复边际递减且厚牌降低 setup', () => {
-  const base = [{ id: 'HELLRAISER' }, ...filler(18)];
-  const normal = impact(base, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const once = [...base, { id: 'POMMEL_STRIKE' }];
-  const upgraded = impact(neutral(10), { id: 'POMMEL_STRIKE', upgraded: true }, 'auto_strike').deltaPoints;
-  const potentialNormal = impact(neutral(10), { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const twice = [...once, { id: 'POMMEL_STRIKE' }];
-  const first = normal;
-  const second = impact(once, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const third = impact(twice, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  assert.ok(upgraded > potentialNormal);
-  assert.ok(first > second && second > third);
-  assert.equal(score([...once, ...filler(12)], 'auto_strike'), score(once, 'auto_strike'));
-  assert.deepEqual(scoreIroncladArchetypes(base, []).map(item => item.id), ARCHETYPES.map(item => item.id));
+test('升级按牌面功能生效，重复饱和后不再刷分', () => {
+  const { references, expand } = require('../knowledge/archetype-affinity');
+  const normal = impact(neutral(10), { id: 'POMMEL_STRIKE' }, 'auto_strike');
+  const upgraded = impact(neutral(10), { id: 'POMMEL_STRIKE', upgraded: true }, 'auto_strike');
+  assert.ok(upgraded.deltaExact > normal.deltaExact);
+  const full = expand(references.auto_strike.cards);
+  const redundant = impact(full, { id: 'POMMEL_STRIKE' }, 'auto_strike');
+  assert.ok(redundant.deltaPoints <= 0);
+  assert.equal(redundant.learningTag, 'redundant');
 });
 
 test('自动打击不再把主动误用风险当作无条件硬毒', () => {
@@ -304,24 +236,13 @@ test('消耗出口、事件和兑现无闸门仍正向，双闸门逐级放大',
   ], 'exhaust').started, false);
 });
 
-test('力量多段无来源仍正向，有来源更高且重复递减', () => {
-  const noSource = impact(neutral(10), { id: 'CONFLAGRATION' }, 'strength').deltaPoints;
-  const withSourceDeck = [{ id: 'INFLAME' }, ...neutral(9)];
-  const withSource = impact(withSourceDeck, { id: 'CONFLAGRATION' }, 'strength').deltaPoints;
-  const repeated = impact(
-    [...withSourceDeck, { id: 'CONFLAGRATION' }],
-    { id: 'CONFLAGRATION' },
-    'strength'
-  ).deltaPoints;
-  assert.ok(noSource > 0);
-  assert.ok(withSource > noSource);
-  assert.ok(withSource > repeated && repeated > 0);
-  const missingSource = state([
-    { id: 'TWIN_STRIKE' }, { id: 'WHIRLWIND' }, { id: 'CONFLAGRATION' }, ...neutral(7)
-  ], 'strength');
-  assert.ok(missingSource.score > 0, 'missing gate must not erase collected components');
-  assert.equal(missingSource.started, false);
-  assert.equal(missingSource.mature, false);
+test('力量配合有收益，饱和输出不再无限堆分', () => {
+  const noSource = impact(neutral(10), { id: 'CONFLAGRATION' }, 'strength');
+  const withSource = impact(deckOf('INFLAME', ...Array(9).fill('MANGLE')), { id: 'CONFLAGRATION' }, 'strength');
+  assert.ok(noSource.deltaPoints > 0);
+  assert.ok(withSource.deltaPoints > noSource.deltaPoints);
+  const { references, expand } = require('../knowledge/archetype-affinity');
+  assert.ok(impact(expand(references.strength.cards), { id: 'CONFLAGRATION' }, 'strength').deltaPoints <= 0);
 });
 
 test('格挡来源和转伤先积累潜力，闸门与三轴组合最高', () => {
@@ -392,51 +313,14 @@ test('候选输出前后阶段并只报告新补齐的直接结构轴', () => {
   assert.deepEqual(support.completedAxes, []);
 });
 
-test('叠卡轴放慢而单卡槽仍由第一张完成', () => {
-  const starter = [
-    ...Array.from({ length: 5 }, () => ({ id: 'STRIKE_IRONCLAD' })),
-    ...filler(4),
-    { id: 'BASH' }
-  ];
-  const firstPommel = impact(starter, { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const secondPommel = impact([...starter, { id: 'POMMEL_STRIKE' }], { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const firstHellraiser = impact(starter, { id: 'HELLRAISER' }, 'auto_strike').deltaPoints;
-  const secondHellraiser = impact([...starter, { id: 'HELLRAISER' }], { id: 'HELLRAISER' }, 'auto_strike').deltaPoints;
-  const pommelAfterGate = impact([...starter, { id: 'HELLRAISER' }], { id: 'POMMEL_STRIKE' }, 'auto_strike').deltaPoints;
-  const pillageAfterLoop = impact(
-    [...starter, { id: 'HELLRAISER' }, { id: 'POMMEL_STRIKE' }],
-    { id: 'PILLAGE' },
-    'auto_strike'
-  ).deltaPoints;
-  assert.ok(firstPommel > 0, `pommel ${firstPommel}`);
-  assert.ok(secondPommel > 0 && secondPommel >= firstPommel * 0.45, `second pommel ${secondPommel}`);
-  assert.ok(firstHellraiser > firstPommel, `hellraiser ${firstHellraiser}`);
-  assert.ok(secondHellraiser <= firstHellraiser * 0.4, `second hellraiser ${secondHellraiser}`);
-  assert.ok(pommelAfterGate > firstPommel, `pommel after activation ${pommelAfterGate} vs ${firstPommel}`);
-  assert.ok(pillageAfterLoop > 0, `pillage ${pillageAfterLoop}`);
-
-  const stacks = [
-    ['BURNING_PACT', 'exhaust', deck => deck],
-    ['CONFLAGRATION', 'strength', deck => [{ id: 'INFLAME' }, ...deck]],
-    ['IMPERVIOUS', 'block', deck => [{ id: 'BARRICADE' }, ...deck]]
-  ];
-  for (const [id, archetype, prepare] of stacks) {
-    const base = prepare(neutral(10));
-    const first = impact(base, { id }, archetype).deltaPoints;
-    const second = impact([...base, { id }], { id }, archetype).deltaPoints;
-    assert.ok(second > 0 && second < first, `${id} second ${second} first ${first}`);
-  }
-
-  for (const [id, archetype] of [
-    ['HELLRAISER', 'auto_strike'],
-    ['FEEL_NO_PAIN', 'exhaust'],
-    ['INFLAME', 'strength'],
-    ['BARRICADE', 'block']
-  ]) {
-    const first = impact(starter, { id }, archetype).deltaPoints;
-    const second = impact([...starter, { id }], { id }, archetype).deltaPoints;
-    assert.ok(second <= first * 0.4, `${id} second ${second} first ${first}`);
-  }
+test('单卡启动槽由首张完成，重复启动不得强制正增量', () => {
+  const base = deckOf('POMMEL_STRIKE', 'STRIKE_IRONCLAD', ...Array(8).fill('MANGLE'));
+  const first = impact(base, { id: 'HELLRAISER' }, 'auto_strike');
+  const duplicate = impact([...base, { id: 'HELLRAISER' }], { id: 'HELLRAISER' }, 'auto_strike');
+  assert.ok(first.deltaPoints > 0);
+  assert.ok(first.completedFunctions.some(item => item.id === 'auto_gate'));
+  assert.ok(duplicate.deltaPoints <= 0);
+  assert.equal(duplicate.learningTag, 'redundant');
 });
 
 test('生成文档版本、数量和 ID 与矩阵一致', () => {

@@ -3,7 +3,6 @@
 const { DanmakuDirector, sameContext } = require('./director');
 const { extractSceneContext, factLines, categoryLabel } = require('./scene-context');
 const { nextActionFact } = require('./codex-facts');
-const { buildRecommendationDialogue } = require('./recommendation-dialogue');
 const { createMonsterDisplayName } = require('./monster-identity');
 const { buildSharedScene } = require('./shared-scene');
 const { normalizeCharacter, personalityFor } = require('./language-profile');
@@ -45,6 +44,8 @@ class DanmakuBridgeAdapter {
     this.director.presentedContentKeys?.clear();
     this.director.context = null;
     this.keyOffer = null;
+    this.shopVisit = null;
+    this.shopVisitSerial = 0;
     this.keyState = null;
     this.director.closed = false;
     this.sequence = -1;
@@ -159,6 +160,7 @@ class DanmakuBridgeAdapter {
       return { accepted: false, reason: 'death_already_entered' };
     }
     this.cancelCommentary();
+    this.keyOffer = null;
     const scope = { runId, sceneId: `${runId}:death-${++this.sceneCount}`, stateRevision: revision };
     this.scope = scope;
     this.previous = structuredClone(state || {});
@@ -234,10 +236,6 @@ class DanmakuBridgeAdapter {
       && normalizeCharacter(this.previous?.run?.character) === context.characterKey;
     this.recentEvents = this.recentEvents.filter(item => this.now() - item.at <= 45_000).slice(-12);
     const recentEvents = this.recentEvents.map(({ at, ...item }) => ({ ...item, ageMs: this.now() - at }));
-    const facts = context.enemies.map(enemy => {
-      const action = enemy.nextMoveName || categoryLabel(enemy.intent);
-      return action ? `${enemy.name}在采样时显示行动：${action}` : `采样时场上有${enemy.name}`;
-    });
     const snapshot = {
       turn: context.turn,
       player: { hp: context.playerHp, maxHp: context.playerMaxHp, block: context.block, energy: context.energy },
@@ -245,21 +243,24 @@ class DanmakuBridgeAdapter {
     };
     const moments = this.memory.pending();
     const runMemories = this.memory.relevant(this.previous);
-    const signature = JSON.stringify([snapshot, this.modEventSerial, runMemories]);
+    const facts = moments.length ? moments.map(item => item.text) : [
+      '本批没有新的显著事件。可以自由闲谈、联想或安静，无需复述状态数值。'
+    ];
+    // 怪物列表只是背景，数量/意图变化不再自动变成新一轮人格旁白。
+    const signature = JSON.stringify([snapshot.player, runMemories]);
     const mode = moments.length ? 'highlight' : signature === this.lastContextSignature ? 'quiet' : 'observation';
     this.lastContextSignature = signature;
-    const momentSerial = this.memory.serial;
     this.memory.claim(moments);
     void Promise.resolve().then(() => {
       if (!current()) return { status: 'cancelled', phrases: [] };
       return this.llmAtmosphere.generate({
-        character: context.characterKey, trigger: 'periodic', batchId, snapshot, facts, recentEvents,
+        runId: scope.runId, character: context.characterKey, trigger: 'periodic', batchId, snapshot, facts, recentEvents,
         moments: moments.map(({ id, kind, text, priority }) => ({ id, kind, text, priority })), runMemories, mode,
+        optionalContext: true,
         recentTexts: [...this.director.recent, ...this.director.queue.map(item => item.text)].slice(-20)
       }, { signal: controller.signal });
     }).then(result => {
       if (!current() || result.status !== 'generated') return;
-      if (!moments.length && this.memory.serial > momentSerial) return;
       if (mode === 'quiet' && this.now() - this.lastQuietAcceptedAt < 30_000) return;
       const commentaryByText = {};
       const phrases = (result.phrases || []).slice(0, mode === 'quiet' ? 1 : 2).filter(text => {
@@ -291,7 +292,6 @@ class DanmakuBridgeAdapter {
   }
 
   tick() {
-    if (this.memory.pending().length) this.director.queue = this.director.queue.filter(item => item.source !== 'ai' || item.commentary?.momentId);
     this.maybeGenerateCommentary();
     return this.director.tick(item => this.isRelevant(item));
   }
@@ -352,9 +352,12 @@ class DanmakuBridgeAdapter {
         }
         this.sharedScene = null;
         this.accepting = false;
-        return this.director.close({ ...this.scope, eventId: `exit-${++this.serial}`, outcome: 'unknown' });
+        const result = this.director.close({ ...this.scope, eventId: `exit-${++this.serial}`, outcome: 'unknown' });
+        this.syncNonCombatKeys(state, runId);
+        return result;
       }
       if (!wasCombat && this.sharedScene?.phase !== 'death') this.sharedScene = null;
+      this.syncNonCombatKeys(state, runId);
       return { accepted: false, reason: 'non_combat' };
     }
 
@@ -368,6 +371,9 @@ class DanmakuBridgeAdapter {
     this.fightKey = fightKey;
     this.previous = structuredClone(state);
     if (entering) {
+      this.keyOffer = null;
+      this.shopVisit = null;
+      this.director.dropKeyComponents();
       this.cancelCommentary();
       this.sceneCount += 1;
     }
@@ -424,28 +430,9 @@ class DanmakuBridgeAdapter {
     return { accepted: false, reason: 'no_new_trigger' };
   }
 
-  async ingestRecommendation(recommendation, { runId, observation } = {}) {
-    if (!recommendation || !runId) return { accepted: false, reason: 'invalid_recommendation' };
-    const revision = Number.isInteger(observation?.sequence) ? observation.sequence : 0;
-    const scope = this.accepting && this.scope
-      ? this.scope
-      : { runId, sceneId: `${runId}:advice-${recommendation.task || 'unknown'}`, stateRevision: revision };
-    this.scope = scope;
-    this.previous = observation?.state ? structuredClone(observation.state) : this.previous || {};
-    this.accepting = true;
-    this.director.setContext(scope);
-    const dialogue = buildRecommendationDialogue(recommendation);
-    const recommendationId = recommendation.id || `${recommendation.task || 'recommendation'}-${recommendation.timestamp || Date.now()}`;
-    return this.emit('recommendation', {
-      eventId: `recommendation-${recommendationId}`,
-      key: recommendationId,
-      priority: 3,
-      factTexts: [dialogue.text],
-      detailByText: { [dialogue.text]: dialogue.detail },
-      factSourceByText: { [dialogue.text]: { type: 'recommendation', source: 'recommendation' } },
-      recommendationId,
-      recommendation
-    });
+  async ingestRecommendation() {
+    // 推荐保留在原面板/桌宠；机会通知只由真实可选卡牌或商店库存驱动。
+    return { accepted: false, reason: 'recommendation_panel_only' };
   }
 
   async ingestFact(fact, { replay = false } = {}) {
@@ -460,9 +447,37 @@ class DanmakuBridgeAdapter {
       data: { cardId: data.cardId, cardName: card?.name || data.cardName } });
   }
 
+  syncNonCombatKeys(state, runId) {
+    if (state.shop && Array.isArray(state.shop.items)) {
+      const data = { ...state.shop };
+      return this.syncKeyComponents({ name: 'shop.updated', data }, state, runId);
+    }
+    if (this.keyOffer?.name.startsWith('shop') && Object.hasOwn(state, 'shop') && state.shop === null
+      && !/merchant|shop/i.test(String(state.run?.room || ''))) {
+      return this.syncKeyComponents({ name: 'shop.closed' }, state, runId);
+    }
+    return this.restoreKeyOffer(state, runId);
+  }
+
+  ensureShopVisit(event, state, runId) {
+    const run = state.run || {};
+    const location = JSON.stringify([runId, run.act, run.totalFloor ?? run.floor, run.currentCoord ?? run.coord]);
+    const externalId = event.data?.visitId || null;
+    if (!this.shopVisit || this.shopVisit.location !== location
+      || externalId && this.shopVisit.externalId && externalId !== this.shopVisit.externalId) {
+      this.shopVisit = { location, externalId, id: externalId || `snapshot-visit-${++this.shopVisitSerial}` };
+    } else if (externalId) this.shopVisit.externalId = externalId;
+    // 快照先到时保留内部机会ID，稍后到达的opened不再为同一商品重播。
+    return this.shopVisit.id;
+  }
+
+  restoreKeyOffer(state, runId) {
+    if (this.keyOffer && this.keyRunId === runId) this.syncKeyComponents(this.keyOffer, state, runId);
+  }
+
   ensureKeyScope(runId, state) {
     const revision = Number.isInteger(state?.timestamp) ? state.timestamp : (this.director.context?.stateRevision || 1);
-    if (!this.director.context || this.director.context.runId !== runId) {
+    if (!this.director.context || this.director.context.runId !== runId || this.director.closed) {
       const scope = { runId, sceneId: `${runId}:key-component`, stateRevision: revision };
       this.scope = scope;
       this.accepting = true;
@@ -489,10 +504,10 @@ class DanmakuBridgeAdapter {
       const data = event.data || {};
       const items = Array.isArray(data.items) ? data.items : [];
       const gold = Number.isFinite(state?.player?.gold) ? state.player.gold : data.gold;
-      const visitId = data.visitId || 'visit';
+      const visitId = this.shopVisit?.id || data.visitId || 'visit';
       const unseen = items.filter(item => {
-        const stockKey = item?.stockKey;
-        if (!stockKey) return true;
+        const kind = item?.itemType || item?.kind;
+        const stockKey = item?.stockKey || `${kind}:${item?.id}`;
         const identity = `key:${runId}:shop:${visitId}:object:${stockKey}`;
         return !this.director.presentedContentKeys.has(identity);
       });
@@ -524,6 +539,7 @@ class DanmakuBridgeAdapter {
     this.keyRunId = runId;
     if (['card.reward.closed', 'card.reward.selected', 'shop.closed', 'event.closed', 'map.opened'].includes(event.name)) {
       this.keyOffer = null;
+      this.shopVisit = null;
       this.director.dropKeyComponents(item => (
         event.name === 'map.opened'
         || event.name === 'event.closed'
@@ -540,6 +556,7 @@ class DanmakuBridgeAdapter {
     const liveState = state || this.keyState;
     if (!liveState) return { accepted: false, reason: 'missing_state' };
     this.ensureKeyScope(runId, liveState);
+    if (event.name.startsWith('shop')) this.ensureShopVisit(event, liveState, runId);
     this.keyOffer = { name: event.name, data: event.data };
     const alerts = this.buildKeyAlerts(event, liveState, runId);
     const keys = new Set(alerts.map(item => item.contentKey));
@@ -578,7 +595,9 @@ class DanmakuBridgeAdapter {
         });
       }
       this.sharedScene = null;
-      return this.director.close({ ...scope, eventId: event.eventId || `event-${++this.serial}`, outcome: event.outcome || 'unknown' });
+      const result = this.director.close({ ...scope, eventId: event.eventId || `event-${++this.serial}`, outcome: event.outcome || 'unknown' });
+      this.restoreKeyOffer(this.keyState, this.keyRunId);
+      return result;
     }
     if (!this.accepting) return { accepted: false, reason: 'not_accepting' };
     if (this.director.closed || this.sharedScene?.phase !== 'combat') return { accepted: false, reason: 'not_in_combat' };

@@ -19,7 +19,15 @@ internal sealed record DraftArchetypeImpact(
     string? AfterStatus = null,
     IReadOnlyList<DraftFunction>? PresentFunctions = null,
     IReadOnlyList<DraftFunction>? MissingFunctions = null,
-    IReadOnlyList<DraftFunction>? CompletedFunctions = null);
+    IReadOnlyList<DraftFunction>? CompletedFunctions = null,
+    string? ReferenceName = null,
+    string? BeforeReferenceName = null,
+    bool? BeforeIdentity = null,
+    bool? AfterIdentity = null,
+    IReadOnlyList<DraftFunction>? BeforePresentFunctions = null,
+    IReadOnlyList<DraftFunction>? BeforeMissingFunctions = null,
+    string? Confidence = null,
+    string? BeforeConfidence = null);
 internal sealed record DraftCardImpact(
     string CardId,
     int DeltaPoints,
@@ -181,6 +189,36 @@ internal static class GameBuddyRewardImpactCodec
                     || !TryParseFunctions(archetypeElement.GetProperty("completedFunctions"), out completedFunctions)) return false;
                 readiness = readinessValue;
             }
+            string? referenceName = null, beforeReferenceName = null, confidence = null, beforeConfidence = null;
+            bool? beforeIdentity = null, afterIdentity = null;
+            IReadOnlyList<DraftFunction>? beforePresentFunctions = null, beforeMissingFunctions = null;
+            if (archetypeElement.TryGetProperty("referenceName", out var referenceElement))
+            {
+                if (referenceElement.ValueKind != JsonValueKind.String
+                    || !archetypeElement.TryGetProperty("beforeReferenceName", out var beforeReferenceElement)
+                    || beforeReferenceElement.ValueKind != JsonValueKind.String
+                    || !archetypeElement.TryGetProperty("beforeIdentity", out var beforeIdentityElement)
+                    || beforeIdentityElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                    || !archetypeElement.TryGetProperty("afterIdentity", out var afterIdentityElement)
+                    || afterIdentityElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+                    || !archetypeElement.TryGetProperty("beforePresentFunctions", out var beforePresentElement)
+                    || !TryParseFunctions(beforePresentElement, out beforePresentFunctions)
+                    || !archetypeElement.TryGetProperty("beforeMissingFunctions", out var beforeMissingElement)
+                    || !TryParseFunctions(beforeMissingElement, out beforeMissingFunctions)
+                    || !archetypeElement.TryGetProperty("confidence", out var confidenceElement)
+                    || confidenceElement.ValueKind != JsonValueKind.String) return false;
+                referenceName = referenceElement.GetString();
+                beforeReferenceName = beforeReferenceElement.GetString();
+                confidence = confidenceElement.GetString();
+                if (referenceName?.Length is < 1 or > 100 || beforeReferenceName?.Length is < 1 or > 100
+                    || confidence is not ("partial" or "configured")) return false;
+                if (!archetypeElement.TryGetProperty("beforeConfidence", out var beforeConfidenceElement)
+                    || beforeConfidenceElement.ValueKind != JsonValueKind.String) return false;
+                beforeConfidence = beforeConfidenceElement.GetString();
+                if (beforeConfidence is not ("partial" or "configured")) return false;
+                beforeIdentity = beforeIdentityElement.GetBoolean();
+                afterIdentity = afterIdentityElement.GetBoolean();
+            }
             if (!byId.TryAdd(id, new DraftArchetypeImpact(
                 id,
                 archetypeDelta,
@@ -197,7 +235,15 @@ internal static class GameBuddyRewardImpactCodec
                 afterStatus,
                 presentFunctions,
                 missingFunctions,
-                completedFunctions))) return false;
+                completedFunctions,
+                referenceName,
+                beforeReferenceName,
+                beforeIdentity,
+                afterIdentity,
+                beforePresentFunctions,
+                beforeMissingFunctions,
+                confidence,
+                beforeConfidence))) return false;
         }
 
         var ordered = ArchetypeIds.Select(id => byId[id]).ToArray();
@@ -223,7 +269,7 @@ internal static class GameBuddyRewardImpactCodec
     {
         var phrase = StatusPhrase(status, partial);
         if (phrase.Length == 0) return $"{name} {readiness}";
-        return $"{name}：准备度 {readiness} / {phrase}";
+        return $"{name}：契合度 {readiness} / {phrase}";
     }
 
     internal static string FormatFunctionLine(IEnumerable<DraftFunction>? present, IEnumerable<DraftFunction>? missing)
@@ -232,13 +278,15 @@ internal static class GameBuddyRewardImpactCodec
         var presentText = string.Join("、", (present ?? []).Select(item => item.Label).Where(label => label.Length > 0));
         var missingText = string.Join("、", (missing ?? []).Select(item => item.Label).Where(label => label.Length > 0));
         if (presentText.Length > 0) parts.Add($"已有：{presentText}");
-        if (missingText.Length > 0) parts.Add($"尚缺：{missingText}");
+        if (missingText.Length > 0) parts.Add($"待补足：{missingText}");
         return string.Join("。", parts);
     }
 
     internal static (IReadOnlyList<DraftFunction> Present, IReadOnlyList<DraftFunction> Missing) CurrentFunctions(DraftArchetypeImpact? impact)
     {
         if (impact is null) return ([], []);
+        if (impact.BeforePresentFunctions is not null && impact.BeforeMissingFunctions is not null)
+            return (impact.BeforePresentFunctions, impact.BeforeMissingFunctions);
         var completed = new HashSet<string>(impact.CompletedFunctions?.Select(item => item.Id) ?? [], StringComparer.Ordinal);
         var present = (impact.PresentFunctions ?? []).Where(item => !completed.Contains(item.Id)).ToArray();
         var missing = (impact.MissingFunctions ?? []).Concat(impact.CompletedFunctions ?? []).ToArray();
@@ -247,7 +295,7 @@ internal static class GameBuddyRewardImpactCodec
 
     internal static string FormatDelta(int delta, string? beforeStatus, string? afterStatus)
     {
-        var signed = delta == 0 ? string.Empty : FormatSignedDelta(delta);
+        var signed = FormatSignedDelta(delta);
         var before = StatusPhrase(beforeStatus, false);
         var after = StatusPhrase(afterStatus, false);
         var transition = before.Length > 0 && after.Length > 0 && beforeStatus != afterStatus
@@ -258,9 +306,10 @@ internal static class GameBuddyRewardImpactCodec
         return $" {signed} · {transition}";
     }
 
-    internal static bool HasPartialSupport(DraftArchetypeImpact? impact)
+    internal static bool HasPartialSupport(DraftArchetypeImpact? impact, bool before = false)
     {
-        if (impact?.PresentFunctions is null || impact.PresentFunctions.Count == 0) return false;
+        var functions = before ? CurrentFunctions(impact).Present : impact?.PresentFunctions;
+        if (functions is null || functions.Count == 0 || impact is null) return false;
         var starters = impact.Id switch
         {
             "auto_strike" => new[] { "auto_gate" },
@@ -269,7 +318,7 @@ internal static class GameBuddyRewardImpactCodec
             "block" => new[] { "block_gate" },
             _ => Array.Empty<string>()
         };
-        return impact.PresentFunctions.Any(item => !starters.Contains(item.Id));
+        return functions.Any(item => !starters.Contains(item.Id));
     }
 
     private static bool TryParseFunctions(JsonElement element, out IReadOnlyList<DraftFunction>? functions)

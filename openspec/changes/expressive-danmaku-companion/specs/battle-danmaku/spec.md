@@ -5,11 +5,11 @@
 ## ADDED Requirements
 
 ### Requirement: Spaced and relevant presentation
-系统 SHALL 保留每 15 秒请求两句与 60 秒超时，AI 实际显示至少间隔 6 秒；就绪的建议、技能与精彩时刻 SHALL 优先于普通闲聊。延后的 AI 不得阻塞就绪技能。无新变化时普通评论 SHALL 至多每 30 秒显示一句；怪物已消失的当前目标评论 SHALL 丢弃。
+系统 SHALL 保留每 15 秒请求两句与 60 秒超时，AI 实际显示至少间隔 6 秒；就绪的关键组件通知、技能与精彩时刻 SHALL 优先于普通闲聊。延后的 AI 不得阻塞就绪技能。无新变化时普通评论 SHALL 至多每 30 秒显示一句；怪物已消失的当前目标评论 SHALL 丢弃。
 
 #### Scenario: Skill arrives between two comments
-- **WHEN** 第一条 AI 已显示，第二条待显示，此时出现技能或建议
-- **THEN** 技能/建议可先显示，第二条仍须满足距上一条 AI 至少 6 秒
+- **WHEN** 第一条 AI 已显示，第二条待显示，此时出现技能或关键通知
+- **THEN** 技能/关键通知可先显示，第二条仍须满足距上一条 AI 至少 6 秒
 
 #### Scenario: Target dies before delayed comment
 - **WHEN** 评论绑定的怪物已消失或死亡
@@ -35,3 +35,47 @@
 #### Scenario: Skill and character comment coexist
 - **WHEN** 技能介绍与 AI 评论同时可见
 - **THEN** 不依赖悬停即可辨认怪物技能与角色感想，技能详情仍可访问
+
+### Requirement: Player centered personality reactions
+人格AI SHALL 将玩家打牌、伤害变化和生命状态作为可选素材，MUST 不强制每批围绕这些事件，也不把静态怪物数量/行动旁白当作默认持续主题。高血量状态 SHALL 不因重复快照或每个周期重复触发。两句 SHALL 采用不同反应角度，重复/近似表达 SHALL 被抑制。怪物技能介绍 SHALL 保留，15秒两句与60秒超时保持。
+
+#### Scenario: Attack and damage
+- **WHEN** 观察到攻击牌打出或敌人明确减少生命
+- **THEN** 可生成相应人格反应，但不能把出牌本身宣称为已命中或把未知伤害归于该牌
+
+#### Scenario: High health without changes
+- **WHEN** 玩家血量充足且持续收到相同状态
+- **THEN** 可有一次基于高血量的角色反应，随后不反复播报血多或怪物场景
+
+
+### Requirement: Optional topics and bounded semantic repetition
+人格AI SHALL 自主选择话题，MUST 不强制每场/每批覆盖攻击、受伤、血量或防御。系统 SHALL 提供丰富人格写作角度及近期话题/笑点记录，限制血量和防御主题各120秒最多一次，并抑制可识别的同义重复；不得为凑数固定轮播示例。
+
+#### Scenario: Low health is optional context
+- **WHEN** 玩家持续残血并每15秒请求弹幕
+- **THEN** 模型可选择其他有依据或不新增事实的角色感想，血量复述即使换措辞也受主题冷却限制
+
+#### Scenario: Independent second line
+- **WHEN** 请求包含攻击或受伤事件
+- **THEN** 两句话无需围绕同一事件，可以独立选角度，或者只输出一句/保持安静
+
+#### Scenario: Concurrent paraphrases
+- **WHEN** 两个并发批次先后返回相近的血量提醒或已识别的相同笑点
+- **THEN** 后返回批次按最新接受历史去重；同局角色历史有界，换局不会错误套用旧局主题禁限
+
+
+#### Scenario: Optional state input
+- **WHEN** 没有新的可用生命状态素材，或生命话题仍在冷却
+- **THEN** 文案请求不再每批附带旧HP和格挡数值，不猜缺失值；新的受伤/出牌不会清掉有效的自由闲谈
+
+#### Scenario: Repeated enemy banter
+- **WHEN** 刚接受针对怪物的调侃，下一批换标签或换词继续同类笑点
+- **THEN** 怪物调侃受45秒冷却，已识别的牙齿/生存等梗另受90秒抑制
+
+
+### Requirement: Character specific voice mechanics
+五角色 SHALL 具有各自的用词、节奏、幽默逻辑和性格反差配置并进入实际请求，MUST 不靠重复关键词区分人格。
+
+#### Scenario: Same optional subject
+- **WHEN** 相同素材分别提供给五角色
+- **THEN** 请求包含五种不同的表达规则与例子，仍不强制某个话题出现

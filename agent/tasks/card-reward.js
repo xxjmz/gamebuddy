@@ -637,6 +637,7 @@ async function recommendCardReward(observation, { llm, now = Date.now(), codex =
               pros: candidate.card.pros,
               cons: candidate.card.cons,
               knowledgeEvaluation: candidate.card.knowledgeEvaluation,
+              archetypeImpacts: candidate.card.archetypeImpacts,
               trigger: candidate.card.trigger || null,
               synergy: candidate.card.synergy || null,
               bossFit: candidate.card.fit.boss,

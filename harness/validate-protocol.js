@@ -341,4 +341,15 @@ assert.equal(validateMessage({
   }
 }).ok, true);
 
+// C# ShopItemSnapshot 对删牌服务使用默认 StockKey=null，CamelCase序列化仍保留null。
+const nullableShop = { ...validShop, items: [...validShop.items, {
+  index: 20, itemType: 'service', id: 'CARD_REMOVAL', name: '删除一张牌', price: 75,
+  stocked: true, affordable: true, onSale: false, card: null, stockKey: null
+}] };
+assert.equal(validateMessage({ type: 'event', name: 'shop.opened', timestamp: Date.now(), data: nullableShop }).ok, true);
+assert.equal(validateMessage({ type: 'state', data: { ...validState, combat: null, shop: nullableShop } }).ok, true);
+for (const stockKey of [5, {}, '', 'x'.repeat(65)]) {
+  assert.equal(validateMessage({ type: 'event', name: 'shop.updated', timestamp: Date.now(), data: { ...nullableShop, items: [{ ...nullableShop.items[0], stockKey }] } }).ok, false);
+}
+
 console.log('Protocol validation cases passed, including four-archetype draft impacts');

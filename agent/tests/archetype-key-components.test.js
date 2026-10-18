@@ -18,7 +18,7 @@ test('关键组件都来自矩阵或 Codex，痛击、纸钱和外卡钳不进�
   assert.equal(KEY_COMPONENTS.some(item => item.id === 'BASH'), false);
   for (const item of KEY_COMPONENTS) {
     if (item.kind === 'card') {
-      assert.equal(IRONCLAD_ARCHETYPE_MATRIX[item.id][item.archetypeKey].group, item.functionId);
+      assert.equal(IRONCLAD_ARCHETYPE_MATRIX[item.id][item.archetypeKey].group, item.functionId === 'block_growth' ? 'block_gate' : item.functionId);
       assert.ok(IRONCLAD_ARCHETYPE_MATRIX[item.id][item.archetypeKey].weight > 0);
       assert.equal(typeof cardNames.get(item.id), 'string');
     } else {
@@ -193,4 +193,22 @@ test('商店区分买得起、买不起、价格未知、售出后缺口和合�
     items: [{ itemType: 'card', id: 'HELLRAISER', name: '地狱狂徒', price: 80, stocked: true, stockKey: 'card:1', card: { upgraded: false } }]
   });
   assert.equal(owned, null);
+});
+
+test('格挡放大不替代留存，单消耗收益也能提示批量消耗配合', () => {
+  const retention = evaluateCardAlerts({ character: 'ironclad', deck: [{ id: 'UNMOVABLE' }, { id: 'BODY_SLAM' }, { id: 'BLOOD_WALL' }], cards: [{ id: 'BARRICADE', name: '壁垒' }] });
+  assert.ok(retention.some(item => item.offer.id === 'BARRICADE' && item.level === 'must_take'));
+  const growth = evaluateCardAlerts({ character: 'ironclad', deck: [{ id: 'BARRICADE' }, { id: 'BODY_SLAM' }, { id: 'BLOOD_WALL' }], cards: [{ id: 'UNMOVABLE', name: '坚定不移' }] });
+  assert.ok(growth.some(item => item.offer.id === 'UNMOVABLE'));
+  const exhaust = evaluateCardAlerts({ character: 'ironclad', deck: [{ id: 'FEEL_NO_PAIN' }], cards: [{ id: 'FIEND_FIRE', name: '恶魔之焰' }] });
+  assert.ok(exhaust.some(item => item.offer.id === 'FIEND_FIRE' && item.level === 'focus'));
+});
+
+
+test('已有痛击填满放大槽不代表打击木偶无用，关键遗物仍可提示但持有后不重复', () => {
+  const deck = [{ id: 'STRIKE_IRONCLAD', name: '打击' }, { id: 'BASH', name: '痛击' }];
+  const items = [{ itemType: 'relic', id: 'STRIKE_DUMMY', name: '打击木偶', price: 150, stocked: true, stockKey: 'relic:0' }];
+  const result = evaluateShopAlerts({ character: 'ironclad', deck, gold: 200, items });
+  assert.match(result.text, /打击木偶/);
+  assert.equal(evaluateShopAlerts({ character: 'ironclad', deck, relics: [{ id: 'STRIKE_DUMMY' }], gold: 200, items }), null);
 });

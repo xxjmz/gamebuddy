@@ -235,8 +235,8 @@ internal static class GameBuddyRewardOverlay
         };
         body.AddThemeConstantOverride("separation", 6);
         var head = new HBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        var title = MakeLabel("铁甲构筑进度", 15, Cream);
-        _stateLabel = MakeLabel("尚未启动", 12, Muted);
+        var title = MakeLabel("铁甲构筑方向", 15, Cream);
+        _stateLabel = MakeLabel("方向尚不明确", 12, Muted);
         _stateLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _stateLabel.HorizontalAlignment = HorizontalAlignment.Right;
         head.AddChild(title);
@@ -296,7 +296,7 @@ internal static class GameBuddyRewardOverlay
             });
         }
 
-        var note = MakeLabel("准备度不是胜率", 11, new Color(0.553f, 0.510f, 0.463f));
+        var note = MakeLabel("契合度不等于胜率或拿牌优先级", 11, new Color(0.553f, 0.510f, 0.463f));
         note.HorizontalAlignment = HorizontalAlignment.Right;
         body.AddChild(note);
         frame.AddChild(body);
@@ -329,36 +329,20 @@ internal static class GameBuddyRewardOverlay
         var baseline = _impacts?.Values.FirstOrDefault();
         var scores = GameBuddyRewardImpactCodec.ArchetypeIds.Select(id => ScoreOf(baseline, id)).ToArray();
         var stages = GameBuddyRewardImpactCodec.ArchetypeIds.Select(id => StageOf(baseline, id)).ToArray();
-        var ranks = GameBuddyRewardImpactCodec.ArchetypeIds.Select(id =>
-        {
-            var archetype = ArchetypeOf(baseline, id);
-            return archetype?.BeforeStatus is string status ? StatusRank(status) : StageRank(StageOf(baseline, id));
-        }).ToArray();
-        var highestStage = ranks.Length == 0 ? 0 : ranks.Max();
-        var highest = scores.Select((score, index) => (score, index))
-            .Where(item => ranks[item.index] == highestStage)
-            .Select(item => item.score)
-            .DefaultIfEmpty(0)
-            .Max();
-        var leaders = scores.Select((score, index) => (score, index))
-            .Where(item => highestStage > 0
-                && ranks[item.index] == highestStage
-                && item.score == highest)
-            .ToArray();
+        var directed = scores.Select((score, index) => (score, index))
+            .Where(item => item.score >= 25 && (ArchetypeOf(baseline, GameBuddyRewardImpactCodec.ArchetypeIds[item.index])?.BeforeIdentity
+                ?? StageRank(stages[item.index]) > 0))
+            .OrderByDescending(item => item.score).ToArray();
+        var highest = directed.FirstOrDefault().score;
+        var leaders = directed.Take(1).Concat(directed.Skip(1)
+            .Where(item => item.score >= 30 && item.score >= highest * 0.5).Take(2)).ToArray();
         if (_stateLabel is not null)
         {
-            var leaderId = leaders.Length == 1 ? GameBuddyRewardImpactCodec.ArchetypeIds[leaders[0].index] : null;
-            var leaderArchetype = leaderId is null ? null : ArchetypeOf(baseline, leaderId);
-            var leaderPhrase = GameBuddyRewardImpactCodec.StatusPhrase(
-                leaderArchetype?.BeforeStatus,
-                GameBuddyRewardImpactCodec.HasPartialSupport(leaderArchetype));
-            _stateLabel.Text = leaders.Length switch
-            {
-                0 => "尚未启动",
-                1 when leaderPhrase.Length > 0 => $"主流派 · {Names[leaders[0].index]} · {leaderPhrase}",
-                1 => $"主流派 · {Names[leaders[0].index]} · {StageLabel(stages[leaders[0].index])}",
-                _ => "混合构筑"
-            };
+            _stateLabel.Text = leaders.Length == 0 ? "方向尚不明确"
+                : leaders.Length > 1 && leaders[0].score - leaders[1].score <= 10
+                    ? $"混合构筑 · {string.Join(" / ", leaders.Select(item => Names[item.index]))}"
+                    : $"主方向 · {Names[leaders[0].index]}" + (leaders.Length > 1
+                        ? $"；副方向 · {string.Join(" / ", leaders.Skip(1).Select(item => Names[item.index]))}" : string.Empty);
             _stateLabel.AddThemeColorOverride("font_color", leaders.Length == 1 ? BarLeader : leaders.Length > 1 ? DeltaUp : Muted);
         }
 
@@ -382,7 +366,7 @@ internal static class GameBuddyRewardOverlay
                     row.Name,
                     after,
                     shownStatus,
-                    GameBuddyRewardImpactCodec.HasPartialSupport(shownArchetype))
+                    GameBuddyRewardImpactCodec.HasPartialSupport(shownArchetype, hoveredImpact is null))
                 : $"{row.Name} · {StageLabel(shownStage)}";
             row.ScoreLabel.Text = hoveredImpact is null ? before.ToString() : $"{before}→{after}";
             var beforeStatus = hoveredImpact?.BeforeStatus ?? currentArchetype?.BeforeStatus ?? currentArchetype?.Status;
@@ -392,7 +376,12 @@ internal static class GameBuddyRewardOverlay
             var currentFunctions = GameBuddyRewardImpactCodec.CurrentFunctions(currentArchetype);
             var present = hoveredImpact is null ? currentFunctions.Present : shownFunctions?.PresentFunctions;
             var missing = hoveredImpact is null ? currentFunctions.Missing : shownFunctions?.MissingFunctions;
-            row.FunctionLabel.Text = GameBuddyRewardImpactCodec.FormatFunctionLine(present, missing);
+            var reference = hoveredImpact?.ReferenceName ?? currentArchetype?.BeforeReferenceName;
+            var teaching = hoveredImpact?.Reason;
+            var functionLine = GameBuddyRewardImpactCodec.FormatFunctionLine(present, missing?.Take(2));
+            row.FunctionLabel.Text = (reference is null ? string.Empty : $"参照：{reference}。") + functionLine
+                + (string.IsNullOrWhiteSpace(teaching) ? string.Empty : $"\n选牌影响：{teaching}")
+                + ((hoveredImpact?.Confidence ?? currentArchetype?.BeforeConfidence) == "partial" ? "（部分效果未建模）" : string.Empty);
             row.DeltaLabel.AddThemeColorOverride("font_color", delta > 0 ? DeltaUp : DeltaDown);
             var nameColor = row.Leader ? Cream : Muted;
             var scoreColor = row.Leader ? BarLeader : Cream;

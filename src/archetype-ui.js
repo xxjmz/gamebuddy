@@ -76,25 +76,23 @@
   }
 
   function buildStatus(scores) {
-    const valid = ordered(scores).filter(item => Number.isFinite(item?.score));
-    if (!valid.length) return { kind: 'unformed', label: '尚未成型', archetypeIds: [] };
-    const highestStage = Math.max(...valid.map(item => STATUS_RANK[statusOf(item)]));
-    if (highestStage === 0) return { kind: 'unformed', label: '尚未启动', archetypeIds: [] };
-    const stageCandidates = valid.filter(item => STATUS_RANK[statusOf(item)] === highestStage);
-    const highest = Math.max(...stageCandidates.map(item => item.score));
-    const leaders = stageCandidates.filter(item => item.score === highest);
-    if (leaders.length === 1) {
-      return {
-        kind: 'primary',
-        label: `主流派 · ${leaders[0].name} · ${statusText(leaders[0])}`,
-        archetypeIds: [leaders[0].id]
-      };
-    }
-    return { kind: 'mixed', label: '混合构筑', archetypeIds: leaders.map(item => item.id) };
+    const valid = ordered(scores).filter(item => Number.isFinite(item?.score)
+      && item.score >= 25 && (typeof item.identity === 'boolean' ? item.identity : stageOf(item) !== 'unformed' || item.presentFunctions?.length > 0))
+      .sort((a, b) => (b.score - a.score) || ORDER_INDEX.get(a.id) - ORDER_INDEX.get(b.id));
+    if (!valid.length) return { kind: 'unformed', label: '方向尚不明确', archetypeIds: [] };
+    const first = valid[0];
+    const secondary = valid.slice(1).filter(item => item.score >= 30 && item.score >= first.score * .5).slice(0, 2);
+    const mixed = secondary.length && first.score - secondary[0].score <= 10;
+    return {
+      kind: mixed ? 'mixed' : secondary.length ? 'primary_with_secondary' : 'primary',
+      label: mixed ? `混合构筑 · ${[first, ...secondary].map(item => item.name).join(' / ')}`
+        : `主方向 · ${first.name}${secondary.length ? `；副方向 · ${secondary.map(item => item.name).join(' / ')}` : ''} · ${statusText(first)}`,
+      archetypeIds: [first.id, ...secondary.map(item => item.id)]
+    };
   }
 
   function selectCardImpacts(impacts, scores) {
-    const candidates = ordered(impacts).filter(item => Number.isFinite(item?.deltaPoints) && item.deltaPoints !== 0);
+    const candidates = ordered(impacts).filter(item => Number.isFinite(item?.deltaPoints) && (item.deltaPoints !== 0 || item.explicit === true || item.learningTag === 'unknown'));
     if (!candidates.length) return [];
     const explicit = candidates.filter(item => item.explicit === true);
     if (!explicit.length) {
@@ -104,7 +102,7 @@
         || (ORDER_INDEX.get(left.id) ?? ORDER.length) - (ORDER_INDEX.get(right.id) ?? ORDER.length)
       ))[0]];
     }
-    return candidates.sort((left, right) => (
+    return explicit.sort((left, right) => (
       Number((STATUS_RANK[right.afterStatus || statusOf({ stage: right.afterStage })] || 0)
         > (STATUS_RANK[right.beforeStatus || statusOf({ stage: right.beforeStage })] || 0))
         - Number((STATUS_RANK[left.afterStatus || statusOf({ stage: left.afterStage })] || 0)
@@ -122,10 +120,10 @@
     const rows = valid.map(item => {
       const score = Math.max(0, Math.min(100, Math.round(item.score)));
       const leader = status.archetypeIds.includes(item.id) ? ' leader' : '';
-      const functions = [functionText('已有：', item.presentFunctions), functionText('尚缺：', item.missingFunctions)].filter(Boolean).join('。');
-      return `<div class="archetype-score${leader}"><div><span>${escapeHtml(item.name)}：准备度 ${score} / ${escapeHtml(statusText(item))}</span><strong>${score}</strong></div>${functions ? `<p>${escapeHtml(functions)}</p>` : ''}<div class="archetype-score-track"><span style="width:${score}%"></span></div></div>`;
+      const functions = [functionText('已有：', item.presentFunctions?.slice(0, 3)), functionText('待补足：', item.missingFunctions?.slice(0, 2))].filter(Boolean).join('。');
+      return `<div class="archetype-score${leader}"><div><span>${escapeHtml(item.name)}：契合度 ${score} / ${escapeHtml(statusText(item))}</span><strong>${score}</strong></div>${item.referenceName ? `<p>参照：${escapeHtml(item.referenceName)}</p>` : ''}${functions ? `<p>${escapeHtml(functions)}</p>` : ''}<div class="archetype-score-track"><span style="width:${score}%"></span></div></div>`;
     }).join('');
-    return `<section class="archetype-overview archetype-iron-plate"><div class="archetype-overview-head"><strong>铁甲构筑进度</strong><span class="archetype-build-state ${status.kind}">${escapeHtml(status.label)}</span></div>${rows}<div class="archetype-win-note">准备度不是胜率</div></section>`;
+    return `<section class="archetype-overview archetype-iron-plate"><div class="archetype-overview-head"><strong>铁甲构筑方向</strong><span class="archetype-build-state ${status.kind}">${escapeHtml(status.label)}</span></div>${rows}<div class="archetype-win-note">契合度衡量教学路线的贴合程度，不等于胜率或拿牌优先级${valid.some(item => item.confidence === 'partial') ? '；部分效果未建模，按已知功能比较' : ''}</div></section>`;
   }
 
   function renderCardImpacts(impacts, scores) {
@@ -135,18 +133,18 @@
       const delta = Math.round(item.deltaPoints);
       const before = Math.round(Number.isFinite(item.beforeScore) ? item.beforeScore : 0);
       const after = Math.round(Number.isFinite(item.afterScore) ? item.afterScore : before + delta);
-      const tone = delta > 0 ? 'positive' : 'negative';
+      const tone = delta > 0 ? 'positive' : delta < 0 ? 'negative' : 'neutral';
       const signed = `${delta > 0 ? '+' : ''}${delta}`;
       const beforeStatus = item.beforeStatus || statusOf({ stage: item.beforeStage });
       const afterStatus = item.afterStatus || statusOf({ stage: item.afterStage });
       const transitioned = (STATUS_RANK[afterStatus] || 0) > (STATUS_RANK[beforeStatus] || 0);
       const milestone = transitioned ? ` · ${STATUS_LABELS[afterStatus]}` : '';
       const completed = Array.isArray(item.completedFunctions) && item.completedFunctions.length
-        ? `补齐：${item.completedFunctions.map(entry => entry.label || entry.id).join('、')}`
+        ? `新增：${item.completedFunctions.map(entry => entry.label || entry.id).join('、')}`
         : Array.isArray(item.completedAxes) && item.completedAxes.length
           ? `补齐：${item.completedAxes.map(axis => AXIS_LABELS[axis] || axis).join('、')}`
           : item.reason;
-      return `<div class="archetype-impact ${tone}${transitioned ? ' milestone' : ''}" title="准备度变化；准备度不是胜率"><strong>${escapeHtml(item.name)}：准备度 ${before} → ${after}（${signed}）${milestone}</strong><span>${escapeHtml(completed)}</span></div>`;
+      return `<div class="archetype-impact ${tone}${transitioned ? ' milestone' : ''}" title="契合度变化；契合度衡量教学路线的贴合程度，不等于胜率或拿牌优先级"><strong>${escapeHtml(item.name)}：契合度 ${before} → ${after}（${signed}）${milestone}</strong><span>${escapeHtml([completed, completed !== item.reason ? item.reason : ''].filter(Boolean).join('。'))}</span></div>`;
     }).join('');
     return `<div class="archetype-impacts">${rows}</div>`;
   }

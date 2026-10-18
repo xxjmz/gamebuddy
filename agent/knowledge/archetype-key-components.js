@@ -6,8 +6,6 @@ const {
   scoreIroncladArchetypes,
   isIronclad,
   cardId,
-  buildDeckContext,
-  conditionFullyMet,
   groupEnabledAmount
 } = require('./ironclad-archetypes');
 
@@ -78,7 +76,7 @@ const CARD_COMPONENTS = [
   component({ archetypeId: 'strength', archetypeKey: 'strength', id: 'SETUP_STRIKE', type: 'core_synergy', functionId: 'strength_balance', substituteGroup: 'strength_balance', gap: '力量平衡' }),
 
   component({ archetypeId: 'block', archetypeKey: 'block', id: 'BARRICADE', type: 'starter', functionId: 'block_gate', substituteGroup: 'block_gate', gap: '格挡启动', shopGap: '启动' }),
-  component({ archetypeId: 'block', archetypeKey: 'block', id: 'UNMOVABLE', type: 'starter', functionId: 'block_gate', substituteGroup: 'block_gate', gap: '格挡启动', shopGap: '启动' }),
+  component({ archetypeId: 'block', archetypeKey: 'block', id: 'UNMOVABLE', type: 'starter', functionId: 'block_growth', substituteGroup: 'block_gate', gap: '格挡启动', shopGap: '启动' }),
   component({ archetypeId: 'block', archetypeKey: 'block', id: 'BODY_SLAM', type: 'core_synergy', functionId: 'block_conversion', substituteGroup: 'block_conversion', gap: '格挡转伤' }),
   component({ archetypeId: 'block', archetypeKey: 'block', id: 'JUGGERNAUT', type: 'core_synergy', functionId: 'block_conversion', substituteGroup: 'block_conversion', gap: '格挡转伤' }),
   component({ archetypeId: 'block', archetypeKey: 'block', id: 'IMPERVIOUS', type: 'core_synergy', functionId: 'block_source', substituteGroup: 'block_source', gap: '格挡来源', condition: 'block_gate_active' }),
@@ -143,11 +141,14 @@ function renderAlert(level, alert, surface) {
   return fill(alert.entry.kind === 'relic' ? TEMPLATES.price_unknown_relic : TEMPLATES.price_unknown_card, values);
 }
 
-function cardEnables(entry, deck) {
-  const context = buildDeckContext(deck);
-  const cell = IRONCLAD_ARCHETYPE_MATRIX[entry.id]?.[entry.archetypeKey];
-  if (!cell || cell.weight <= 0 || cell.group !== entry.functionId) return false;
-  return conditionFullyMet(cell.condition, context);
+function cardEnables(entry, after) {
+  const present = id => after.presentFunctions.some(item => item.id === id);
+  if (!present(entry.functionId)) return false;
+  if (entry.condition === 'auto_gate_active') return present('auto_gate');
+  if (entry.condition === 'strength_source_active') return present('strength_source');
+  if (entry.condition === 'block_gate_active') return present('block_gate') || present('block_growth');
+  if (entry.condition === 'exhaust_both_gates') return present('exhaust_pain') || present('exhaust_draw');
+  return true;
 }
 
 function classify(entry, offer, deck, relicList) {
@@ -160,13 +161,21 @@ function classify(entry, offer, deck, relicList) {
   const afterList = scoreIroncladArchetypes(afterDeck, afterRelics);
   const before = beforeList.find(item => item.id === entry.archetypeId);
   const after = afterList.find(item => item.id === entry.archetypeId);
-  if (entry.kind === 'card' && !cardEnables(entry, afterDeck)) return null;
+  if (entry.kind === 'card' && !cardEnables(entry, after)) return null;
   const amount = entry.kind === 'card'
-    ? groupEnabledAmount(deck, entry.archetypeKey, entry.functionId)
+    ? entry.functionId === 'block_gate' ? (deck || []).filter(copy => cardId(copy) === 'BARRICADE').length
+      : entry.functionId === 'block_growth' ? (deck || []).filter(copy => ['UNMOVABLE', 'PROLONG'].includes(cardId(copy))).length
+        : groupEnabledAmount(deck, entry.archetypeKey, entry.functionId)
     : (relicList || []).some(relic => (relic?.id || relic) === entry.id) ? entry.duplicate.sufficientAt : 0;
   const beforeHas = before.presentFunctions.some(item => item.id === entry.functionId);
   const afterHas = after.presentFunctions.some(item => item.id === entry.functionId);
-  const enabledKit = before.presentFunctions.length > 0;
+  // 普通过牌/起手防御不构成强推某流派的证据。
+  const enabledKit = (deck || []).some(copy => {
+    const id = cardId(copy);
+    const cell = IRONCLAD_ARCHETYPE_MATRIX[id]?.[entry.archetypeKey];
+    return cell?.weight > 0 && !['none', 'auto_support', 'exhaust_support', 'strength_throughput', 'block_support'].includes(cell.group)
+      && (entry.archetypeId !== 'block' || id !== 'DEFEND_IRONCLAD');
+  });
   const delta = after.score - before.score;
   const sufficient = amount >= entry.duplicate.sufficientAt;
   const extra = Number.isFinite(entry.duplicate.extraBelow) && amount < entry.duplicate.extraBelow && delta > 0;
@@ -178,7 +187,9 @@ function classify(entry, offer, deck, relicList) {
     else if (!beforeHas && !sufficient) level = 'direction';
     else if (extra) level = 'focus';
   } else if (entry.kind === 'relic') {
-    if (enabledKit && delta > 0 && amount < entry.duplicate.sufficientAt) level = 'focus';
+    // 易伤与木偶能叠加；辅助分槽已满不代表这件遗物没用，不能靠契合度差值拦掉事实通知。
+    const strikeDummyHelps = entry.id === 'STRIKE_DUMMY' && before.presentFunctions.some(item => item.id === 'auto_ammo');
+    if (enabledKit && (delta > 0 || strikeDummyHelps) && amount < entry.duplicate.sufficientAt) level = 'focus';
   } else if ((!beforeHas && afterHas && !sufficient) || extra) {
     if (delta > 0 || (!beforeHas && afterHas)) level = 'focus';
   }

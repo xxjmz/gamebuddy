@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { DanmakuBridgeAdapter } = require('../agent/danmaku/bridge-adapter');
 const { DanmakuDirector } = require('../agent/danmaku/director');
 
 const userData = fs.mkdtempSync(path.join(os.tmpdir(), 'gamebuddy-danmaku-smoke-'));
@@ -103,6 +104,57 @@ app.whenReady().then(async () => {
   const screenshotPath = path.join(os.tmpdir(), 'gamebuddy-danmaku-personas-preview.png');
   fs.writeFileSync(screenshotPath, (await window.webContents.capturePage()).toPNG());
   console.log(`Danmaku renderer smoke passed: ${JSON.stringify(stats)}; preview: ${screenshotPath}`);
+  // 完整事件顺序经过 adapter/director，再通过真实 preload/IPC 上屏。
+  window.webContents.send('bridge-danmaku-clear', {}); await waitForCount(0);
+  const adapter = new DanmakuBridgeAdapter({ now: () => now });
+  adapter.director.counter = 100; // 与上半段独立director的测试消息ID分开
+  const live = { run: { character: 'ironclad', runId: 'mod-run', floor: 2 }, player: { hp: 60, maxHp: 80,
+    cards: [...Array(5).fill({ id: 'STRIKE_IRONCLAD', name: '打击' }), ...Array(4).fill({ id: 'DEFEND_IRONCLAD', name: '防御' }), { id: 'BASH', name: '痛击' }] }, combat: { turn: 2, enemies: [] } };
+  const observation = sequence => ({ schema: 'gamebuddy.observation.v1', sequence, fresh: true, state: live });
+  await adapter.ingestObservation(observation(1), { runId: 'app-session' });
+  adapter.syncKeyComponents({ name: 'card.reward.opened', data: { opportunityId: 'smoke-core', cards: [{ id: 'PERFECTED_STRIKE', name: '完美打击' }] } }, live, 'app-session');
+  live.combat = null;
+  await adapter.ingestObservation(observation(2), { runId: 'app-session' });
+  await adapter.ingestRecommendation({ id: 'smoke-flame', task: 'card_reward', primary: { action: 'TAKE_CARD', cardName: '火焰屏障' }, reason: '本地推荐回放' }, { runId: 'app-session', observation: observation(2) });
+  const [alert] = adapter.tick();
+  assert.equal(alert.source, 'key_component');
+  window.webContents.send('bridge-danmaku', { ...alert, character: 'ironclad' });
+  window.webContents.send('bridge-danmaku', { ...alert, character: 'ironclad' });
+  await waitForCount(1);
+  assert.match(await window.webContents.executeJavaScript("document.querySelector('[data-source=key_component]').textContent"), /完美打击/);
+  now += 500;
+  assert.deepEqual(adapter.tick(), []);
+  assert.equal(await window.webContents.executeJavaScript("document.querySelectorAll('[data-source=recommendation]').length"), 0);
+  const coreScreenshot = path.join(os.tmpdir(), 'gamebuddy-core-alert-preview.png');
+  await window.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(resolve => setTimeout(resolve, 300)))');
+  fs.writeFileSync(coreScreenshot, (await window.webContents.capturePage()).toPNG());
+  console.log(`Core alert rendered once; ordinary recommendation suppressed: ${coreScreenshot}`);
+  window.webContents.send('bridge-danmaku-clear', {}); await waitForCount(0);
+  Object.assign(live, { schema: 'gamebuddy.state.v1', timestamp: 100, source: 'renderer-shop-replay', map: { visited: [] } });
+  live.run.act = 1; live.run.room = 'Merchant'; live.run.floor = 3;
+  Object.assign(live.player, { gold: 300, block: 0, energy: 3, maxEnergy: 3, relics: [], potions: [] });
+  live.player.cards.push({ id: 'POMMEL_STRIKE', name: '剑柄打击' });
+  live.shop = { gold: 300, items: [
+    { index: 0, stockKey: 'card:0', itemType: 'card', id: 'HELLRAISER', name: '地狱狂徒', price: 80, stocked: true, card: { id: 'HELLRAISER', name: '地狱狂徒' } },
+    { index: 1, stockKey: 'relic:0', itemType: 'relic', id: 'STRIKE_DUMMY', name: '打击木偶', price: 100, stocked: true },
+    { index: 2, stockKey: null, itemType: 'service', id: 'CARD_REMOVAL', name: '删除一张牌', price: 75, stocked: true, card: null }
+  ] };
+  const { createObservationStore } = require('../harness/observation-store');
+  const store = createObservationStore();
+  const shopStateResult = store.ingest({ type: 'state', data: live }, Date.now());
+  assert.equal(shopStateResult.kind, 'state', shopStateResult.reason);
+  now += 1000;
+  await adapter.ingestObservation({ ...store.getObservation(), sequence: 3 }, { runId: 'app-session' });
+  await adapter.ingestRecommendation({ id: 'shop-plan', task: 'shop_choice', primary: { itemName: '地狱狂徒' } });
+  const [shopAlert] = adapter.tick(); assert.equal(shopAlert.source, 'key_component');
+  window.webContents.send('bridge-danmaku', { ...shopAlert, character: 'ironclad' }); await waitForCount(1);
+  const shopText = await window.webContents.executeJavaScript("document.querySelector('[data-source=key_component]').textContent");
+  assert.match(shopText, /地狱狂徒/); assert.match(shopText, /打击木偶/);
+  assert.equal(await window.webContents.executeJavaScript("document.querySelectorAll('[data-source=recommendation]').length"), 0);
+  const shopScreenshot = path.join(os.tmpdir(), 'gamebuddy-shop-alert-preview.png');
+  await window.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(resolve => setTimeout(resolve, 300)))');
+  fs.writeFileSync(shopScreenshot, (await window.webContents.capturePage()).toPNG());
+  console.log(`Nullable shop accepted; core card/relic rendered without repeating advice: ${shopScreenshot}`);
   clearTimeout(timeout);
   window.destroy();
   app.exit(0);

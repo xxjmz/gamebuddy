@@ -220,7 +220,9 @@ class DanmakuDirector {
     this.pruneTexts();
     this.awaitingPresentation.set(message.id, message.source);
     while (this.awaitingPresentation.size > 4096) this.awaitingPresentation.delete(this.awaitingPresentation.keys().next().value);
-    return [{ ...message, lane, durationMs: 10_000 }];
+    // reconfirm 只属于主进程队列；函数无法经 Electron IPC 结构化克隆。
+    const { reconfirm, ...payload } = message;
+    return [{ ...payload, lane, durationMs: 10_000 }];
   }
 
   contentKey(text, event) {

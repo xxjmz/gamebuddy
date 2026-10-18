@@ -184,9 +184,9 @@ h1 { margin: 9px 0 7px; color: var(--cream); font: 500 30px Georgia, "Songti SC"
 .draft-card-head strong { color: var(--mint); font: 600 22px Georgia, serif; }
 .draft-card.top-pick .draft-card-head strong { color: var(--amber); }
 .archetype-impacts { display: grid; gap: 4px; margin-top: 9px; }
-.archetype-impact { display: flex; justify-content: space-between; gap: 5px; padding: 4px 6px; border: 1px solid #6a4a30; color: var(--cream); background: #2a2118; font-size: 9px; }
-.archetype-impact strong { color: inherit; font-weight: 700; white-space: nowrap; }
-.archetype-impact span { overflow: hidden; font-weight: 500; opacity: .82; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.archetype-impact { display: flex; flex-direction: column; gap: 4px; padding: 7px 8px; border: 1px solid #6a4a30; color: var(--cream); background: #2a2118; font-size: 11px; line-height: 1.5; }
+.archetype-impact strong { color: inherit; font-weight: 700; white-space: normal; }
+.archetype-impact span { font-weight: 500; opacity: .86; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .archetype-impact.positive { border-color: #8a6234; color: #e0a15a; }
 .archetype-impact.negative { border-color: #6a4038; color: #c48474; }
 .draft-card .archetype-impacts + .card-name { margin-top: 8px; }
@@ -222,8 +222,9 @@ h1 { margin: 9px 0 7px; color: var(--cream); font: 500 30px Georgia, "Songti SC"
 .archetype-build-state { color: #8d8276; font-size: 9px; letter-spacing: .4px; }
 .archetype-build-state.primary { color: #e0a15a; }
 .archetype-build-state.mixed { color: var(--amber); }
-.archetype-score { margin-top: 7px; }
-.archetype-score > div:first-child { display: flex; justify-content: space-between; color: #b7aa9b; font-size: 9px; }
+.archetype-score { margin-top: 10px; }
+.archetype-score p { margin: 4px 0; color: #aa9c8c; font-size: 10px; line-height: 1.5; }
+.archetype-score > div:first-child { display: flex; justify-content: space-between; color: #b7aa9b; font-size: 10px; }
 .archetype-score strong { color: var(--cream); font: 600 12px Georgia, serif; }
 .archetype-score.leader > div:first-child { color: var(--cream); }
 .archetype-score.leader strong { color: #e0a15a; }

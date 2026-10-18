@@ -1,4 +1,5 @@
 const cards = require('../data/codex/cards.json');
+const affinity = require('./archetype-affinity');
 const { normalizeKey, inferUpgraded } = require('./spire-codex');
 
 const ARCHETYPES = Object.freeze([
@@ -614,168 +615,45 @@ function archetypeHasDirectKit(deck, key) {
   });
 }
 
-function scoreOneDetailed(key, deck, relics = []) {
-  const context = buildDeckContext(deck);
-  const config = CONFIG[key];
-  let baseAxisCoverage = 0;
-  let gateCoverage = 0;
-  let antiSynergy = 0;
-  for (const [group, maximum] of Object.entries(config.axes)) {
-    let amount = 0;
-    for (const copy of context.copies) {
-      const cell = IRONCLAD_ARCHETYPE_MATRIX[copy.id][key];
-      if (cell.group !== group) continue;
-      const factor = conditionFactor(cell.condition, context)
-        * structuralFactor(key, group, context)
-        * (config.peripheral.includes(group) ? peripheralFactor(key, config, context) : 1);
-      if (cell.weight >= 0) amount += cell.weight * copy.effective * factor;
-      else antiSynergy += Math.abs(cell.weight) * 8 * copy.effective * factor;
-    }
-    const coverage = saturated(maximum, amount, STACK_GROUPS.has(group) ? STACK_SATURATION : SLOT_SATURATION);
-    if (config.gates.includes(group)) gateCoverage += coverage;
-    else baseAxisCoverage += coverage;
-  }
-  const relicSet = new Set((relics || []).map(relicId).filter(Boolean));
-  let relevantRelics = 0;
-  for (const [id, value] of Object.entries(config.relics)) {
-    if (relicSet.has(id)) relevantRelics += value;
-  }
-  const extraDraw = relicSet.has('BAG_OF_PREPARATION') ? 2 : 0;
-  const setupComplete = axesSatisfied(context, key, config.setup);
-  const setupCompletion = config.setupMax
-    * (setupComplete ? 1 : 0)
-    * stackFullness(context, key, config.setup);
-  let synergyOnly = 0;
-  for (const synergy of config.synergies) {
-    if (synergy.groups.every(group => hasGroup(context, key, group))) {
-      const weakestAxis = Math.min(...synergy.groups.map(group => context.groups.get(`${key}:${group}`) || 0));
-      synergyOnly += saturated(synergy.maximum, weakestAxis) * stackFullness(context, key, synergy.groups);
-    }
-  }
-  const synergyCompletion = setupCompletion + synergyOnly;
-  const blueprintScore = Math.max(0, Math.min(100,
-    baseAxisCoverage + gateCoverage + synergyCompletion + relevantRelics - antiSynergy));
-  const coreClosed = axesSatisfied(context, key, config.coreLoop);
-  const coreConsistency = requirementReliability(context, key, config.coreLoop, extraDraw);
-  const idealConsistency = requirementReliability(context, key, config.ideal, extraDraw);
-  const blueprintRatio = blueprintScore / 100;
-  const idealCoverage = blueprintRatio * blueprintRatio;
-  const reliableCoverage = coreConsistency * Math.sqrt(Math.max(0, blueprintRatio));
-  const axisWeight = Object.values(config.axes).reduce((sum, value) => sum + value, 0) || 1;
-  const coveragePart = clamp(90 * (baseAxisCoverage + gateCoverage) / axisWeight, 0, 90);
-  const relicCapacity = Object.values(config.relics).reduce((sum, value) => sum + value, 0);
-  const synergyCapacity = config.synergies.reduce((sum, synergy) => sum + synergy.maximum, 0);
-  const bonusCapacity = config.setupMax + synergyCapacity + relicCapacity;
-  const synergyPart = bonusCapacity > 0
-    ? clamp(10 * (setupCompletion + synergyOnly + relevantRelics) / bonusCapacity, 0, 10)
-    : 0;
-  const readiness = Math.round(clamp(coveragePart + synergyPart - clamp(antiSynergy, 0, 15), 0, 100));
-  const present = enabledFunctionIds(key, context);
-  return {
-    raw: readiness,
-    readiness,
-    context,
-    consistency: coreConsistency,
-    idealConsistency,
-    idealCoverage,
-    reliableCoverage,
-    coreClosed,
-    blueprintScore,
-    extraDraw,
-    present,
-    status: operatingStatus(key, present, idealConsistency),
-    components: {
-      baseAxisCoverage,
-      gateCoverage,
-      setupCompletion,
-      synergyCompletion,
-      relevantRelics,
-      antiSynergy,
-      coveragePart,
-      synergyPart,
-      dilution: blueprintScore - readiness
-    }
-  };
-}
-
-function scoreOne(key, deck, relics = []) {
-  return scoreOneDetailed(key, deck, relics).raw;
-}
-
-function describeArchetype(archetype, detail) {
-  const present = detail.present;
-  const status = detail.status;
-  const partial = hasPartialKit(archetype.key, present);
-  const functions = KEY_FUNCTIONS[archetype.key];
-  const stage = legacyStage(status);
-  const readiness = detail.readiness;
-  return {
-    id: archetype.id,
-    name: archetype.name,
-    score: readiness,
-    readiness,
-    blueprintScore: Math.round(detail.blueprintScore),
-    consistency: Math.round(detail.consistency * 100),
-    stage,
-    status,
-    statusLabel: statusLabelFor(status, partial),
-    partialKit: partial,
-    presentFunctions: functionViews(functions.filter(id => present.has(id))),
-    missingFunctions: functionViews(functions.filter(id => !present.has(id))),
-    started: status === 'operational' || status === 'stable',
-    mature: status === 'stable'
-  };
-}
-
 function scoreIroncladArchetypes(deck, relics = []) {
-  return ARCHETYPES.map(archetype => describeArchetype(
-    archetype,
-    scoreOneDetailed(archetype.key, deck, relics)
-  ));
-}
-
-function reasonFor(cell, deltaPoints, rawDelta = deltaPoints) {
-  if (cell.role === 'neutral') return rawDelta < 0 ? REASONS.dilution : REASONS.neutral;
-  return REASONS[cell.reasonCode];
+  return ARCHETYPES.map(archetype => {
+    const detail = affinity.evaluate(deck || [], relics, archetype.id);
+    const status = detail.status;
+    const partial = status === 'missing_starter' && detail.presentFunctions.length > 0;
+    return {
+      ...detail, name: archetype.name,
+      // 旧消费者继续读 score/readiness；它们均为同一次契合度计算。
+      blueprintScore: detail.coverage, consistency: detail.focus,
+      stage: legacyStage(status), statusLabel: statusLabelFor(status, partial), partialKit: partial,
+      started: status === 'operational' || status === 'stable', mature: status === 'stable'
+    };
+  });
 }
 
 function impactIroncladArchetypes(deck, relics = [], candidate) {
-  const id = cardId(candidate);
-  if (!id || !IRONCLAD_ARCHETYPE_MATRIX[id]) return null;
+  const normalized = affinity.normalizeDeck([candidate])[0];
+  const id = normalized.id;
+  if (!id) return null;
   const before = scoreIroncladArchetypes(deck, relics);
   const after = scoreIroncladArchetypes([...(deck || []), candidate], relics);
-  const beforeContext = buildDeckContext(deck);
-  const afterContext = buildDeckContext([...(deck || []), candidate]);
   return ARCHETYPES.map((archetype, index) => {
-    const cell = IRONCLAD_ARCHETYPE_MATRIX[id][archetype.key];
-    const deltaPoints = after[index].score - before[index].score;
-    const config = CONFIG[archetype.key];
-    const completedFunctions = after[index].presentFunctions.filter(item => (
-      !before[index].presentFunctions.some(existing => existing.id === item.id)
-    ));
+    const previous = before[index], next = after[index];
+    const cell = IRONCLAD_ARCHETYPE_MATRIX[id]?.[archetype.key];
+    const lesson = affinity.explainImpact(deck || [], relics, candidate, archetype.id, previous, next);
+    const completedFunctions = next.presentFunctions.filter(item => !previous.presentFunctions.some(existing => existing.id === item.id));
     return {
-      id: archetype.id,
-      name: archetype.name,
-      beforeScore: before[index].score,
-      afterScore: after[index].score,
-      readiness: after[index].readiness,
-      status: after[index].status,
-      beforeStatus: before[index].status,
-      afterStatus: after[index].status,
-      presentFunctions: after[index].presentFunctions,
-      missingFunctions: after[index].missingFunctions,
-      completedFunctions,
-      beforeStage: before[index].stage,
-      afterStage: after[index].stage,
-      completedAxes: config.direct.filter(group => (
-        !hasGroup(beforeContext, archetype.key, group)
-        && hasGroup(afterContext, archetype.key, group)
-      )),
-      started: before[index].started,
-      deltaPoints,
-      role: cell.role,
-      reason: reasonFor(cell, deltaPoints, deltaPoints),
-      explicit: cell.role !== 'neutral'
+      id: archetype.id, name: archetype.name,
+      beforeScore: previous.score, afterScore: next.score, readiness: next.score, affinity: next.score,
+      status: next.status, beforeStatus: previous.status, afterStatus: next.status,
+      beforeStage: previous.stage, afterStage: next.stage, started: previous.started,
+      presentFunctions: next.presentFunctions, missingFunctions: next.missingFunctions, completedFunctions,
+      beforePresentFunctions: previous.presentFunctions, beforeMissingFunctions: previous.missingFunctions,
+      completedAxes: completedFunctions.map(item => item.id),
+      beforeIdentity: previous.identity, afterIdentity: next.identity,
+      beforeConfidence: previous.confidence, beforeReferenceName: previous.referenceName, referenceName: next.referenceName,
+      referenceId: next.referenceId, referenceOrigin: next.referenceOrigin,
+      gaps: next.gaps, confidence: next.confidence, uncertainties: next.uncertainties, ruleVersion: next.ruleVersion,
+      role: cell?.role || 'support', ...lesson
     };
   });
 }
@@ -802,7 +680,7 @@ function generateMatrixMarkdown() {
     '# 铁甲战士四流派完整评价矩阵',
     '',
     `> 数据版本：Codex 当前快照；卡牌数：${ironcladCards.length}；矩阵版本：1。`,
-    '> 流派度衡量距离完全体蓝图的结构完成度，不表示胜率或即时战力；started/mature 另行检查必要轴。',
+    '> 此矩阵用于角色与关键提示；实时契合度由 archetype-affinity.js 按功能、配合和参照密度计算，不表示胜率。',
     '',
     '| ID | 卡牌 | 自动打击 | 消耗引擎 | 力量叠加 | 格挡壁垒 |',
     '|---|---|---|---|---|---|'

@@ -112,3 +112,21 @@
 - **WHEN** 维护者在集中配置中把某张核心协同牌改为普通配套
 - **THEN** 后续选牌 MUST NOT 再把该牌播报为关键组件
 - **AND** 不需要改动弹幕提示词
+
+### Requirement: Nullable stock metadata compatibility
+商店协议 SHALL 将缺失或null的可选stockKey视为尚无稳定库存键，MUST 不因合法删牌服务的null键拒绝整份商店。非法键类型、负价格、重复商品索引仍 MUST 拒绝。
+
+#### Scenario: Removal service serialized by Mod
+- **WHEN** 商店含删牌服务且其stockKey为null
+- **THEN** 整份商店可被接收，推荐和关键通知分别正常工作
+
+### Requirement: Snapshot recovery and panel only recommendations
+新鲜shop快照 SHALL 能建立或恢复当前商店关键机会，MUST 不等待新的opened事件。普通选牌、商店、路线等推荐 SHALL 只进入面板/桌宠，MUST 不自动复述为弹幕。系统机会通知 SHALL 仅播关键卡牌/遗物，人格与怪物技能保持。
+
+#### Scenario: Reconnect while inside shop
+- **WHEN** 重连后收到含关键商品的新鲜shop快照但没有shop.opened
+- **THEN** 关键商品可及时提醒，后续同访问的事件不得重播
+
+#### Scenario: Shop recommendation arrives
+- **WHEN** 商店推荐生成成功或更新
+- **THEN** 推荐仍显示在原面板，弹幕队列不生成recommendation来源消息，关键提醒仍独立有效

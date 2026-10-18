@@ -222,6 +222,7 @@ function shopView() {
         <div class="draft-card-meta">${escapeHtml(typeLabels[item.itemType] || item.itemType)} · ${escapeHtml(price)}${item.rarity ? ` · ${escapeHtml(item.rarity)}` : ''}</div>
         <p>${escapeHtml(effect)}</p>
         ${pros || cons ? `<ul class="draft-notes">${pros}${cons}</ul>` : ''}
+        ${archetypeUi?.renderCardImpacts(analysis.archetypeImpacts, analysis.archetypeScores) || ''}
       </article>`;
     }).join('')
     : `<div class="data-empty large-empty">${state.shop ? '当前已没有仍在售的商品；进店时生成的购物清单仍保留在右侧。' : '进入商店后，Mod 会同步全部在售卡牌、遗物、药水和删牌服务。'}</div>`;

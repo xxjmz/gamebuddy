@@ -2,6 +2,7 @@
 
 const { textKey } = require('./director');
 const { personalityFor } = require('./language-profile');
+const { TOPICS, CommentaryVariety, exampleSample, conditionTopics, expressionMotifs } = require('./variety');
 
 const CONTROL = /[\u0000-\u001f\u007f]/g;
 
@@ -12,6 +13,17 @@ function cleanPhrase(value) {
   text = text.replace(/^[^。！？!?：:]{1,12}[：:]\s*/u, '');
   if (text.length < 4 || text.length > 48 || /https?:|www\.|广告|加群|私信|微信|辱骂/i.test(text)) return '';
   return text;
+}
+
+// 字符二元组用于抑制近似复述；不能代替语义模型，也不声称能识别所有同义笑话。
+function similarPhrase(left, right) {
+  const a = textKey(left), b = textKey(right);
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 8) return false;
+  const grams = text => new Set(Array.from({ length: text.length - 1 }, (_, i) => text.slice(i, i + 2)));
+  const x = grams(a), y = grams(b);
+  const shared = [...x].filter(value => y.has(value)).length;
+  return 2 * shared / (x.size + y.size) >= .72;
 }
 
 class DanmakuLlmAtmosphere {
@@ -25,10 +37,12 @@ class DanmakuLlmAtmosphere {
     this.pending = new Set();
     this.recentTexts = new Map();
     this.lastStartedAt = -Infinity;
+    this.variety = new CommentaryVariety({ now });
+    this.exampleSerial = 0;
   }
 
   key(context) {
-    return [context.character || 'generic', context.batchId || '', context.trigger, ...(context.facts || [])].join('|');
+    return [context.runId || '', context.character || 'generic', context.batchId || '', context.trigger, ...(context.facts || [])].join('|');
   }
 
   async generate(context = {}, { signal } = {}) {
@@ -45,30 +59,46 @@ class DanmakuLlmAtmosphere {
     const promise = (async () => {
       try {
         const profile = personalityFor(context.character);
+        const varietyContext = { ...context, character: profile.key };
+        const constraints = this.variety.constraints(varietyContext);
+        const statusKinds = ['player_hurt', 'high_hp', 'low_hp', 'low_hp_survived'];
+        const availableMoments = (context.moments || []).filter(item => !constraints.avoidTopics.includes('health') || !statusKinds.includes(item.kind));
+        const snapshot = context.snapshot ? { ...context.snapshot, player: {} } : null;
+        // 生命/格挡不是默认写作任务。仅新的状态素材可带生命数值；旧状态不反复灌入模型。
+        if (snapshot && availableMoments.some(item => statusKinds.includes(item.kind))) {
+          snapshot.player = { hp: context.snapshot.player?.hp, maxHp: context.snapshot.player?.maxHp };
+        }
+        const facts = (context.facts || []).filter(text => !constraints.avoidTopics.includes('health') || !conditionTopics(text).includes('health'));
         const result = await this.llm.completeDanmaku({
           character: profile.key,
           characterName: profile.name,
           trigger: context.trigger || 'periodic',
           tone: profile.tone,
           style: profile.style,
+          voice: profile.voice,
           attention: profile.attention,
           reactions: profile.reactions,
           memoryVoice: profile.memoryVoice,
-          moments: context.moments || [],
-          runMemories: context.runMemories || [],
+          moments: availableMoments,
+          runMemories: (context.runMemories || []).filter(text => !constraints.avoidTopics.includes('health') || !conditionTopics(text).includes('health')),
           mode: context.mode || 'observation',
-          examples: profile.examples,
+          examples: profile.examples.filter(text => !conditionTopics(text).some(topic => constraints.avoidTopics.includes(topic))
+            && !expressionMotifs(text).some(motif => constraints.avoidMotifs.includes(motif))),
+          scenarioExamples: exampleSample(profile, this.exampleSerial++, { ...constraints, allowMemory: Boolean(context.runMemories?.length) }),
+          creativeAngles: TOPICS,
+          topicPolicy: '事件和状态都是可选素材，不是每场/每批必说清单；自由选择角度，不报血量/防御仪表盘；两句可以各说不同的事。',
+          ...constraints,
           count: 2,
-          facts: (context.facts || []).slice(0, 24),
-          snapshot: context.snapshot || null,
+          facts: facts.slice(0, 24),
+          snapshot,
           recentEvents: (context.recentEvents || []).slice(-12),
-          recentTexts: (context.recentTexts || []).slice(-20)
+          recentTexts: [...(context.recentTexts || []), ...constraints.recentTopics.map(item => item.text)].slice(-20)
         }, { signal });
         if (signal?.aborted) return { status: 'cancelled', phrases: [] };
         const phrases = Array.isArray(result?.phrases) ? result.phrases : [];
         const enemies = context.snapshot?.enemies || [];
         const allowedKeys = new Set(enemies.map(enemy => enemy.key));
-        const moments = new Set((context.moments || []).map(item => item.id));
+        const moments = new Set(availableMoments.map(item => item.id));
         const valid = phrases.map(value => {
           const structured = value && typeof value === 'object';
           const text = cleanPhrase(structured ? value.text : value);
@@ -78,21 +108,29 @@ class DanmakuLlmAtmosphere {
           const named = enemies.filter(enemy => text.includes(enemy.name)).map(enemy => enemy.key);
           const enemyKeys = structured && Array.isArray(value.enemyKeys) ? value.enemyKeys : named.length ? named : momentId ? [] : [...allowedKeys];
           if (enemyKeys.some(key => !allowedKeys.has(key))) return null;
-          return { text, momentId, enemyKeys: [...new Set([...enemyKeys, ...named])] };
+          const topic = structured && Object.hasOwn(TOPICS, value.topic) ? value.topic : null;
+          const motif = structured && typeof value.motif === 'string' ? value.motif.slice(0, 32) : '';
+          const targetsEnemy = named.length > 0 || structured && Array.isArray(value.enemyKeys) && value.enemyKeys.length > 0;
+          return { text, momentId, enemyKeys: [...new Set([...enemyKeys, ...named])], topic, motif, targetsEnemy };
         }).filter(Boolean);
-        const excluded = new Set((context.recentTexts || []).map(textKey));
-        const selected = valid.filter(item => {
+        const excluded = [...(context.recentTexts || []), ...this.recentTexts.keys(),
+          ...profile.examples, ...Object.values(profile.scenarioExamples || {}).flat()];
+        const selected = [];
+        for (const item of valid) {
           const key = textKey(item.text);
-          if (excluded.has(key) || this.recentTexts.has(key)) return false;
-          excluded.add(key); return true;
-        }).slice(0, 2);
+          if (excluded.some(previous => similarPhrase(previous, key))) continue;
+          // 在返回时检查最新历史，不能只用发起请求时的快照；慢批次会并发返回。
+          if (!this.variety.accept(varietyContext, item)) continue;
+          excluded.push(key); selected.push(item);
+          if (selected.length === 2) break;
+        }
         const items = selected.map(item => item.text);
         this.cache.set(key, this.now() + this.ttlMs);
         for (const text of items) this.recentTexts.set(textKey(text), this.now() + this.ttlMs);
         while (this.cache.size > 512) this.cache.delete(this.cache.keys().next().value);
         while (this.recentTexts.size > 512) this.recentTexts.delete(this.recentTexts.keys().next().value);
         this.onLog({ event: 'success', trigger: context.trigger, count: items.length });
-        return { status: items.length ? 'generated' : valid.length || Array.isArray(result?.phrases) && !phrases.length ? 'duplicate' : 'failed', phrases: items, commentaryByText: Object.fromEntries(selected.map(({ text, ...meta }) => [text, meta])) };
+        return { status: items.length ? 'generated' : valid.length || Array.isArray(result?.phrases) && !phrases.length ? 'duplicate' : 'failed', phrases: items, commentaryByText: Object.fromEntries(selected.map(({ text, targetsEnemy, ...meta }) => [text, meta])) };
       } catch (error) {
         if (signal?.aborted) return { status: 'cancelled', phrases: [] };
         this.onLog({ event: 'fallback', trigger: context.trigger, reason: error.message });
@@ -105,4 +143,4 @@ class DanmakuLlmAtmosphere {
   }
 }
 
-module.exports = { DanmakuLlmAtmosphere, cleanPhrase };
+module.exports = { DanmakuLlmAtmosphere, cleanPhrase, similarPhrase };

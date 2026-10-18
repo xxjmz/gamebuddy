@@ -94,7 +94,7 @@ function validateShop(shop, prefix = 'shop') {
     if (item.description !== undefined && item.description !== null && typeof item.description !== 'string') {
       return { ok: false, reason: `${prefix} item description must be a string or null` };
     }
-    if (item.stockKey !== undefined && (typeof item.stockKey !== 'string' || !item.stockKey || item.stockKey.length > 64)) {
+    if (item.stockKey !== undefined && item.stockKey !== null && (typeof item.stockKey !== 'string' || !item.stockKey || item.stockKey.length > 64)) {
       return { ok: false, reason: `${prefix} item stockKey must be a non-empty string` };
     }
     if (item.itemType === 'card') {

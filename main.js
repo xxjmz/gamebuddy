@@ -394,13 +394,6 @@ function clearAgentThinking(task) {
 
 function publishRecommendation(recommendation) {
   broadcast('bridge-recommendation', recommendation);
-  if (recommendation) {
-    const observation = currentObservation();
-    void danmakuAdapter.ingestRecommendation(recommendation, {
-      runId: agentRunId,
-      observation
-    }).catch(error => console.warn('GameBuddy recommendation danmaku skipped:', error.message));
-  }
   if (recommendation?.task === 'card_reward' || recommendation?.task === 'rest_site' || recommendation?.task === 'event_choice' || recommendation?.task === 'map_route' || recommendation?.task === 'shop_choice') {
     activeCardRecommendation = recommendation;
     activeCardExpanded = false;
@@ -485,7 +478,8 @@ function handleAcceptedEvent(event) {
     cardName: event.data?.cardName || event.data?.card?.name
   }).catch(error => console.warn('GameBuddy danmaku event skipped:', error.message));
   const liveState = observationStore.getObservation()?.state;
-  const keyRunId = liveState?.run?.runId || agentRunId;
+  // 弹幕场景统一使用应用会话 ID；Mod runId 仅用于事实来源校验。
+  const keyRunId = agentRunId || liveState?.run?.runId;
   if (keyRunId) {
     try {
       danmakuAdapter.syncKeyComponents(event, liveState, keyRunId);

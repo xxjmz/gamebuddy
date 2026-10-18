@@ -19,7 +19,7 @@ function legacyImpact(impact) {
     support: '过牌辅助',
     softAnti: '支线冲突'
   }[impact.role] || (impact.reason === '仅增加牌组厚度' ? '稀释'
-    : /打击弹药/.test(impact.reason) ? '弹药'
+    : /打击弹药|打击牌供给/.test(impact.reason) ? '弹药'
     : impact.deltaPoints < 0 ? '稀释'
       : impact.reason);
   return { ...impact, reason };
@@ -53,6 +53,7 @@ function draftArchetypes(card) {
       || impact.deltaPoints < -100 || impact.deltaPoints > 100) return null;
     if (!Number.isInteger(impact.beforeScore) || impact.beforeScore < 0 || impact.beforeScore > 100
       || !Number.isInteger(impact.afterScore) || impact.afterScore < 0 || impact.afterScore > 100
+      || impact.deltaPoints !== impact.afterScore - impact.beforeScore
       || !DRAFT_ARCHETYPE_STAGES.has(impact.beforeStage)
       || !DRAFT_ARCHETYPE_STAGES.has(impact.afterStage)
       || !Array.isArray(impact.completedAxes)
@@ -72,8 +73,11 @@ function draftArchetypes(card) {
     if (typeof impact.status === 'string') entry.status = impact.status;
     if (typeof impact.beforeStatus === 'string') entry.beforeStatus = impact.beforeStatus;
     if (typeof impact.afterStatus === 'string') entry.afterStatus = impact.afterStatus;
-    for (const field of ['presentFunctions', 'missingFunctions', 'completedFunctions']) {
+    for (const field of ['presentFunctions', 'missingFunctions', 'completedFunctions', 'beforePresentFunctions', 'beforeMissingFunctions']) {
       if (Array.isArray(impact[field])) entry[field] = impact[field].map(item => ({ ...item }));
+    }
+    for (const field of ['affinity', 'deltaExact', 'referenceId', 'referenceName', 'beforeReferenceName', 'confidence', 'beforeConfidence', 'learningTag', 'beforeIdentity', 'afterIdentity', 'ruleVersion']) {
+      if (impact[field] !== undefined) entry[field] = impact[field];
     }
     return entry;
   });

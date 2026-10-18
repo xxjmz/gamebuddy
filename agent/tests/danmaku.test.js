@@ -72,7 +72,7 @@ test('skill changes appear immediately independently of the AI cadence', async (
   assert.equal(adapter.director.presentationStats().commentaryAiPercent, null);
 });
 
-test('recommendations create deterministic advice danmaku with hover description', async () => {
+test('普通推荐只留在面板，adapter不再生成推荐复述弹幕', async () => {
   const adapter = new DanmakuBridgeAdapter({ now: () => 0 });
   const result = await adapter.ingestRecommendation({
     schema: 'gamebuddy.recommendation.v1',
@@ -88,12 +88,9 @@ test('recommendations create deterministic advice danmaku with hover description
     runId: 'run',
     observation: { sequence: 4, state: state({ combat: false }) }
   });
-  assert.equal(result.accepted, true);
-  const item = adapter.director.queue[0];
-  assert.equal(item.text, '选牌建议！拿下「测试护盾卡」。');
-  assert.match(item.detail.lines.join('\n'), /获得 8 点格挡/);
-  assert.match(item.detail.lines.join('\n'), /当前牌组缺少稳定防御/);
-  assert.equal(item.detail.source, 'recommendation');
+  assert.equal(result.accepted, false);
+  assert.equal(result.reason, 'recommendation_panel_only');
+  assert.equal(adapter.director.queue.length, 0);
 });
 
 test('stale duplicate observations do not create a second combat wave', async () => {
@@ -242,7 +239,10 @@ test('every 15 seconds uses latest state and Mod events even while an earlier ba
   const second = requests[1].context;
   assert.equal(second.snapshot.player.hp, 25);
   assert.equal(second.snapshot.enemies[0].name, '新怪物');
-  assert.match(second.facts.join(' '), /缩壳/);
+  assert.equal(second.snapshot.enemies[0].nextMoveName, '缩壳');
+  assert.match(second.facts.join(' '), /生命从60降到25/);
+  assert.equal(second.optionalContext, true);
+  assert.ok(second.moments.some(item => item.kind === 'player_hurt'));
   assert.equal(second.recentEvents.length, 1);
   assert.match(second.recentEvents[0].facts.join(' '), /痛击/);
   assert.notEqual(second.batchId, requests[0].context.batchId);
@@ -263,7 +263,7 @@ test('same-scene pending AI survives ordinary snapshot and action changes', asyn
   const adapter = new DanmakuBridgeAdapter({ llmAtmosphere: { generate: () => new Promise(done => { resolve = done; }) } });
   await adapter.ingestObservation(observation(1, state()), { runId: 'run' });
   await settle();
-  const next = state({ enemies: [{ name: '小啃兽', intent: 'DefendIntent' }] }); next.player.hp -= 1;
+  const next = state({ enemies: [{ name: '小啃兽', intent: 'DefendIntent' }] }); next.player.energy -= 1;
   await adapter.ingestObservation(observation(2, next), { runId: 'run' });
   resolve({ status: 'generated', phrases: ['这一下，记下了。'] });
   await settle();
