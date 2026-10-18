@@ -249,4 +249,18 @@ function fact(sequence, eventType, overrides = {}) {
   assert.equal(previous.ackSourceSeq, 2);
 }
 
+{
+  const root = temporaryRoot('gamebuddy-facts-fatal-combat');
+  const store = createLocalFactStore({ rootDir: root, now: () => 13_000 });
+  assert.equal(store.ingest(fact(1, 'combat.started', {
+    combatId: 'fatal',
+    attemptGeneration: 0,
+    payload: { enemies: [{ id: 'OWL_MAGISTRATE', name: '猫头鹰法官' }] }
+  })).durable, true);
+  assert.equal(store.ingest(fact(2, 'run.ended', { payload: { cleared: false, reason: 'game_ended_not_cleared' } })).durable, true);
+  const restarted = createLocalFactStore({ rootDir: root, now: () => 14_000 });
+  const types = restarted.getEffectiveFacts('run-a').map(item => item.eventType);
+  assert.deepEqual(types, ['combat.started', 'run.ended']);
+}
+
 console.log('Local fact store tests passed.');

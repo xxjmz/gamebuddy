@@ -197,6 +197,7 @@ public static class GameBuddyExporter
             ascension = snapshot.Run.Ascension,
             act = snapshot.Run.Act,
             floor = snapshot.Run.Floor,
+            totalFloor = snapshot.Run.TotalFloor,
             hp = snapshot.Player.Hp,
             maxHp = snapshot.Player.MaxHp,
             gold = snapshot.Player.Gold,

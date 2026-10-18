@@ -32,6 +32,15 @@ assert.match(html, /主角色/);
 assert.match(html, /玩法五星图/);
 assert.match(html, /角色 · 通关状态 · BOSS · 楼层 · 单回合伤害/);
 assert.match(html, /守护者/);
+assert.match(html, /关底 BOSS/);
+const killerHtml = window.GameBuddyReviewUi.render({
+  ...dashboard,
+  recentRuns: [{ character: 'ironclad', result: 'loss', encounterKind: 'killer', bossName: '猫头鹰法官', floor: 39, maxTurnDamage: 10 }]
+});
+assert.match(killerHtml, /死于/);
+assert.match(killerHtml, /猫头鹰法官/);
+assert.match(killerHtml, /39 层/);
+assert.doesNotMatch(killerHtml, /关底 BOSS/);
 assert.match(html, /最高单回合伤害/);
 assert.match(html, /128/);
 assert.match(html, /未知/);

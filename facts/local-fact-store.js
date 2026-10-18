@@ -149,9 +149,17 @@ function createLocalFactStore({ rootDir, now = () => Date.now() } = {}) {
     for (const [combatId, combat] of Object.entries(manifest.combats || {})) {
       if (combat.pendingGeneration !== undefined && combat.pendingGeneration !== null) {
         const pending = path.join(paths.combats, `${safeId(combatId)}-g${combat.pendingGeneration}.jsonl`);
-        if (fs.existsSync(pending)) fs.rmSync(pending);
-        delete combat.pendingGeneration;
-        coverage.health.push({ at: now(), type: 'discarded_incomplete_attempt', combatId });
+        const pendingSize = fs.existsSync(pending) ? fs.statSync(pending).size : 0;
+        const fatalAttempt = (combat.activeGeneration === undefined || combat.activeGeneration === null) && pendingSize > 0;
+        if (fatalAttempt) {
+          combat.activeGeneration = combat.pendingGeneration;
+          delete combat.pendingGeneration;
+          coverage.health.push({ at: now(), type: 'kept_unfinished_combat', combatId });
+        } else {
+          if (fs.existsSync(pending)) fs.rmSync(pending);
+          delete combat.pendingGeneration;
+          coverage.health.push({ at: now(), type: 'discarded_incomplete_attempt', combatId });
+        }
         recoveryDirty = true;
       }
     }

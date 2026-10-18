@@ -33,6 +33,37 @@ function number(value) {
   return Number.isFinite(value) ? value : null;
 }
 
+function encounterLabel(payload) {
+  const enemies = Array.isArray(payload?.enemies)
+    ? payload.enemies.map(enemy => enemy?.name).filter(Boolean)
+    : [];
+  if (enemies.length) return enemies.join('、');
+  return payload?.bossName || payload?.encounterName || null;
+}
+
+function wholeRunFloor(observations) {
+  const explicit = [...observations].reverse().find(fact => number(fact.payload?.totalFloor) !== null);
+  if (explicit) return number(explicit.payload.totalFloor);
+  const segments = [];
+  for (const fact of observations) {
+    const act = number(fact.payload?.act);
+    const floor = number(fact.payload?.floor);
+    if (act === null || floor === null) continue;
+    const current = segments.at(-1);
+    if (!current || current.act !== act) segments.push({ act, floors: [floor] });
+    else current.floors.push(floor);
+  }
+  if (!segments.length) return null;
+  return segments.reduce((total, segment, index) => {
+    const positive = segment.floors.filter(floor => floor > 0);
+    if (!positive.length) return total;
+    let highest = Math.max(...positive);
+    const completedAct = index < segments.length - 1;
+    if (completedAct && positive.includes(highest - 1)) highest -= 1;
+    return total + highest;
+  }, 0);
+}
+
 function summarize(runId, facts, coverage) {
   const ended = [...facts].reverse().find(fact => fact.eventType === 'run.ended');
   if (!ended || typeof ended.payload?.cleared !== 'boolean') return null;
@@ -49,21 +80,31 @@ function summarize(runId, facts, coverage) {
   let maxTurnDamage = 0;
   let finalBossId = null;
   let finalBossName = null;
+  let finalEncounterKind = null;
+  const openCombats = new Map();
 
   for (const fact of facts) {
     const payload = fact.payload || {};
-    if (fact.eventType === 'combat.started' && fact.combatId) {
+    const attemptKey = fact.combatId ? `${fact.combatId}:${fact.attemptGeneration ?? 0}` : null;
+    if (fact.eventType === 'combat.started' && attemptKey) {
       const prior = combats.get(fact.combatId) || {};
       const roomType = String(payload.roomType || payload.nodeType || prior.roomType || '').toLowerCase();
-      const combat = { ...prior, ...payload, roomType };
+      const combat = { ...prior, ...payload, roomType, occurredAt: fact.occurredAt, sourceSeq: fact.sourceSeq };
       combats.set(fact.combatId, combat);
+      openCombats.set(attemptKey, combat);
       if (roomType.includes('boss') || payload.boss === true) {
         finalBossId = payload.bossId || payload.encounterId || finalBossId;
-        finalBossName = payload.bossName || payload.encounterName || finalBossName;
+        finalBossName = payload.bossName || payload.encounterName || encounterLabel(payload) || finalBossName;
       }
     }
-    if (fact.eventType === 'combat.ended' && fact.combatId) {
+    if (fact.eventType === 'combat.ended' && attemptKey) {
       combats.set(fact.combatId, { ...(combats.get(fact.combatId) || {}), victory: payload.victory });
+      openCombats.delete(attemptKey);
+    }
+    if (fact.eventType === 'combat.attempt_replaced' && fact.combatId) {
+      for (const key of [...openCombats.keys()]) {
+        if (key.startsWith(`${fact.combatId}:`)) openCombats.delete(key);
+      }
     }
     if (fact.eventType === 'turn.started' && fact.combatId) {
       currentTurn.set(fact.combatId, `${fact.attemptGeneration}:${payload.turn ?? payload.round ?? fact.eventId}`);
@@ -113,6 +154,17 @@ function summarize(runId, facts, coverage) {
   }
   counters.shopsVisited = shops.size;
   counters.restSites = rests.size;
+  const died = ended.payload.cleared === false && ended.payload.reason !== 'abandoned';
+  if (died) {
+    const killer = [...openCombats.values()].sort((left, right) => (
+      (left.occurredAt || 0) - (right.occurredAt || 0) || (left.sourceSeq || 0) - (right.sourceSeq || 0)
+    )).at(-1);
+    finalBossId = killer ? killer.bossId || killer.encounterId || killer.enemies?.[0]?.id || null : null;
+    finalBossName = killer ? encounterLabel(killer) : null;
+    finalEncounterKind = killer ? 'killer' : null;
+  } else if (finalBossName) {
+    finalEncounterKind = 'boss';
+  }
   const cardCoverage = coverage?.families?.card_play?.state;
   if (cardCoverage !== 'available') {
     counters.typedCardsPlayed = 0;
@@ -127,9 +179,10 @@ function summarize(runId, facts, coverage) {
     endedAt: number(ended.occurredAt),
     result: ended.payload.cleared ? 'win' : 'loss',
     finalAct: number(last.act),
-    finalFloor: number(last.totalFloor ?? last.floor),
+    finalFloor: wholeRunFloor(observations),
     finalBossId,
     finalBossName,
+    finalEncounterKind,
     maxTurnDamage: coverage?.families?.combat_resolution?.state === 'available' ? maxTurnDamage : null,
     initialDeckSize: Array.isArray(first.deck) ? first.deck.length : null,
     finalState: {

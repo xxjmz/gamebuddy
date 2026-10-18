@@ -132,7 +132,7 @@
           <div class="review-run-card${expanded ? ' is-expanded' : ''}" role="button" tabindex="0" data-run-id="${escapeHtml(run.runId)}" aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${panelId}">
             <img src="${characterImage(run.character)}" alt="" />
             <div class="review-run-character"><strong>${escapeHtml(characterName(run.character))}</strong><span class="review-result ${className}">${label}</span></div>
-            <div><span>关底 BOSS</span><strong>${escapeHtml(run.bossName || '未知')}</strong></div>
+            <div><span>${run.encounterKind === 'killer' ? '死于' : '关底 BOSS'}</span><strong>${escapeHtml(run.bossName || '未知')}</strong></div>
             <div><span>最终楼层</span><strong>${Number.isFinite(run.floor) ? `${run.floor} 层` : '未知'}</strong></div>
             <div><span>最高单回合伤害</span><strong>${Number.isFinite(run.maxTurnDamage) ? run.maxTurnDamage : '未知'}</strong></div>
           </div>

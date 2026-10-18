@@ -404,6 +404,7 @@ function buildDashboard(history) {
       result: run.result,
       bossId: run.finalBossId || null,
       bossName: run.finalBossName || null,
+      encounterKind: run.finalEncounterKind || null,
       floor: number(run.finalFloor),
       maxTurnDamage: number(run.maxTurnDamage),
       endedAt: number(run.endedAt),
