@@ -1,53 +1,53 @@
 ## Purpose
 
-让玩家从桌宠右键打开密钥页并粘贴一次密钥，GameBuddy 立刻用这份密钥调用腾讯云代码助手的模型网关，不用改环境变量或重启。
+让玩家从桌宠右键填入 API Key 和网关。配过之后模型请求优先走这条通道，走不通时同一轮回到原来的模型配置。
 
 ## ADDED Requirements
 
-### Requirement: Pet context menu opens the key page and a paste dialog
-桌宠右键菜单 SHALL 提供「配置密钥」。选择后系统浏览器 MUST 打开 `https://tencent.sso.codebuddy.cn/profile/keys`，同时 MUST 出现一个只接受密钥粘贴的对话框。取消或空白提交 MUST NOT 写入配置。
+### Requirement: Pet context menu opens the key page and a two-field dialog
+桌宠右键菜单 SHALL 提供「配置密钥」。选择后系统浏览器 MUST 打开 `https://tencent.sso.codebuddy.cn/profile/keys`，同时 MUST 出现配置框。第一行 MUST 接受 API Key。第二行 MUST 标明为网关，默认值为 `https://copilot.tencent.com/v2/`，并 MUST 用文字说明这是公司个人 token 网关。玩家 MUST 可以修改网关地址。取消或空白 API Key MUST NOT 写入配置。
 
 #### Scenario: Configure key from the pet
 - **WHEN** 玩家在桌宠上右键并选择「配置密钥」
-- **THEN** 系统浏览器打开密钥页，并显示密钥输入框
+- **THEN** 系统浏览器打开密钥页，并显示 API Key 和预填的公司个人 token 网关
 
 #### Scenario: Cancel leaves configuration unchanged
-- **WHEN** 玩家打开对话框后取消，或提交空白内容
-- **THEN** 已有模型配置保持不变，也不新增本地密钥
+- **WHEN** 玩家打开对话框后取消，或提交空白 API Key
+- **THEN** 已有模型配置保持不变，也不新增本地网关配置
 
-### Requirement: Saved key is applied immediately from local app configuration
-确认一份非空密钥后，应用 MUST 把它写入当前用户的应用本地配置，并立刻让后续模型请求使用它。下次启动 MUST 优先使用这份本地配置，再回退到 `.env` 和进程环境变量。保存 MUST NOT 创建或修改操作系统环境变量，也 MUST NOT 修改仓库 `.env`。日志、界面和错误文本 MUST NOT 显示完整密钥。
+### Requirement: Saved gateway is preferred and the original client remains
+确认非空 API Key 后，应用 MUST 把密钥和网关写入当前用户的应用本地配置，并立刻让后续模型请求优先使用它。下次启动 MUST 继续优先使用这份本地配置。保存 MUST NOT 创建或修改操作系统环境变量，也 MUST NOT 修改仓库 `.env`。没有这份本地配置时，模型请求 MUST 继续使用原来的环境变量客户端。日志、界面和错误文本 MUST NOT 显示完整密钥。
 
 #### Scenario: Key works without restart
-- **WHEN** 玩家提交一份非空密钥
-- **THEN** 后续模型请求使用该密钥，无需退出应用
+- **WHEN** 玩家提交一份非空 API Key 和网关
+- **THEN** 后续模型请求优先使用该密钥和网关，无需退出应用
 
-#### Scenario: Next launch reads the saved key
-- **WHEN** 应用重新启动且本地配置里已有密钥
-- **THEN** 模型请求使用该密钥，即使进程环境变量和 `.env` 里没有密钥
+#### Scenario: Next launch keeps the preference
+- **WHEN** 应用重新启动且本地配置里已有密钥和网关
+- **THEN** 模型请求优先使用该配置，原来的环境变量配置仍保留
 
-#### Scenario: Operating system environment stays unchanged
-- **WHEN** 玩家保存密钥
-- **THEN** 操作系统的用户环境变量和系统环境变量都不包含这份新密钥
+#### Scenario: No preference leaves the original call unchanged
+- **WHEN** 玩家没有保存过右键配置
+- **THEN** 模型请求仍使用原来的密钥、网关和 Bearer 认证
 
-### Requirement: Requests use the CodeBuddy chat gateway
-由该对话框保存的配置 MUST 把模型请求发到 `https://copilot.tencent.com/v2/chat/completions`，并用 `X-Api-Key` 携带密钥。该预设 MUST NOT 使用 `Authorization: Bearer`。其他来源的模型配置 MUST 继续使用原来的 Bearer 认证。已配置的腾讯模型 ID MUST 被沿用；没有腾讯模型 ID 时 MUST NOT 把 DeepSeek 默认模型发给该网关，对话框 MUST 说明还缺模型，且规则模式继续可用。
+### Requirement: Company gateway and custom gateway use different request shapes
+主机为 `copilot.tencent.com` 的已保存网关 MUST 把请求发到该根地址下的 `/chat/completions`，并用 `X-Api-Key` 携带密钥。玩家改成其他网关时，请求 MUST 使用该网关根地址，并沿用原来的接口类型和 `Authorization: Bearer`。原来的客户端本身 MUST 继续使用 Bearer。
 
-#### Scenario: Chat request reaches the v2 gateway
-- **WHEN** 本地配置已有密钥和腾讯模型 ID，并产生一次模型请求
+#### Scenario: Default company gateway
+- **WHEN** 本地配置使用 `https://copilot.tencent.com/v2/` 和一份密钥，并产生一次优先请求
 - **THEN** 请求发往 `https://copilot.tencent.com/v2/chat/completions`，请求头包含 `X-Api-Key`
 
-#### Scenario: Existing Bearer providers stay on Bearer
-- **WHEN** 模型配置来自原有 DeepSeek 或其他 Bearer 网关，而不是这份对话框配置
-- **THEN** 请求仍使用 `Authorization: Bearer`
+#### Scenario: Replaced gateway keeps bearer authentication
+- **WHEN** 玩家把网关改成另一个地址并产生一次优先请求
+- **THEN** 请求发往该地址，并使用 `Authorization: Bearer`
 
-#### Scenario: Missing model does not call the gateway
-- **WHEN** 玩家保存了密钥，但没有已配置的腾讯模型 ID
-- **THEN** 不向该网关发送模型请求，对话框说明还缺模型，建议继续使用规则模式
+### Requirement: A failed preferred request falls back to the original client
+优先请求出现网络失败、认证失败、超时或没有可用结果时，同一次调用 MUST 改用原来的模型客户端。调用被玩家或场景取消时 MUST NOT 再发起原来的请求。原来的客户端也失败或不可用时，规则模式 MUST 继续可用，且 MUST NOT 阻断桌宠和对局界面。
 
-### Requirement: A failed check does not block the game companion
-保存后若已经具备模型 ID，应用 MUST 做一次连通探测。探测失败时 MUST 保留对话框中的密钥输入并说明失败，且 MUST NOT 阻断桌宠、对局建议或规则模式。
+#### Scenario: Preferred gateway rejects the key
+- **WHEN** 优先请求返回认证失败，且原来的客户端可用
+- **THEN** 同一次调用改用原来的客户端，并采用其结果
 
-#### Scenario: Gateway rejects the key
-- **WHEN** 探测返回认证失败或网关错误
-- **THEN** 对话框仍可修改并再次提交，桌宠和对局界面保持可用
+#### Scenario: Cancel does not start the original request
+- **WHEN** 优先请求因当前场景取消而中止
+- **THEN** 不再调用原来的客户端

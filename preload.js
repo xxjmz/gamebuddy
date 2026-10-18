@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('windowControls', {
   setCardExpanded: expanded => ipcRenderer.send('set-card-expanded', Boolean(expanded))
 });
 
+contextBridge.exposeInMainWorld('gatewaySetup', {
+  load: () => ipcRenderer.invoke('gateway-setup:load'),
+  save: payload => ipcRenderer.invoke('gateway-setup:save', payload),
+  cancel: () => ipcRenderer.send('gateway-setup:cancel')
+});
+
 contextBridge.exposeInMainWorld('gamebuddyBridge', {
   onState: callback => ipcRenderer.on('bridge-state', (_event, state) => callback(state)),
   onEvent: callback => ipcRenderer.on('bridge-event', (_event, event) => callback(event)),

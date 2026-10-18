@@ -161,6 +161,11 @@ function stringifyLog(extra) {
   return typeof extra === 'string' ? extra : JSON.stringify(extra, null, 2);
 }
 
+function authHeaders(config) {
+  if (config?.authScheme === 'x-api-key') return { 'X-Api-Key': config.apiKey };
+  return { Authorization: `Bearer ${config.apiKey}` };
+}
+
 function redactSecrets(text, apiKey) {
   const key = String(apiKey || '').trim();
   const raw = String(text ?? '');
@@ -190,7 +195,7 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.apiKey}`
+          ...authHeaders(config)
         },
         body: JSON.stringify(body),
         signal: controller.signal
@@ -218,14 +223,15 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
 
   function emitLog(requestId, task, phase, suffix, extra) {
     const label = `${requestId} ${suffix}`;
-    logLlm(label, extra);
+    const text = redactSecrets(stringifyLog(extra), config.apiKey);
+    logLlm(label, extra === undefined ? undefined : text);
     try {
       onLog?.({
         requestId,
         task,
         phase,
         label,
-        text: redactSecrets(stringifyLog(extra), config.apiKey),
+        text,
         at: Date.now()
       });
     } catch {
@@ -357,5 +363,7 @@ module.exports = {
   parseAllowedTemperature,
   readSseText,
   stringifyLog,
-  redactSecrets
+  redactSecrets,
+  normalizeApiRoot,
+  authHeaders
 };

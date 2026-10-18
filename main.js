@@ -1,10 +1,20 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, dialog, shell } = require('electron');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const WebSocket = require('ws');
 const { createObservationStore } = require('./harness/observation-store');
 const { createOrchestrator } = require('./agent/orchestrator');
-const { createOpenAiClient, readLlmConfig } = require('./agent/llm/openai');
+const { createOpenAiClient, readLlmConfig, redactSecrets } = require('./agent/llm/openai');
+const {
+  KEYS_PAGE_URL,
+  COMPANY_GATEWAY_NAME,
+  DEFAULT_GATEWAY_URL,
+  readGatewayPreference,
+  writeGatewayPreference,
+  buildPreferredConfig,
+  createFallbackLlm,
+  preferenceFile
+} = require('./agent/llm/preferred-gateway');
 const { ensureMapRoutes, routeChoiceCount } = require('./agent/tasks/route');
 const { decide } = require('./agent/router');
 const { recordDecision } = require('./agent/recorder');
@@ -55,10 +65,24 @@ reviewService.refreshFromFacts(factStore);
 let reviewClearToken = null;
 const llmConfig = readLlmConfig();
 const baseLlmConfig = { ...llmConfig };
+const GATEWAY_PREFERENCE_PATH = preferenceFile(app.getPath('userData'));
+let gatewayPreference = readGatewayPreference(GATEWAY_PREFERENCE_PATH);
+let gatewayWindow;
+
+function makeLlmClient(overrides = {}, hooks = {}) {
+  const originalConfig = { ...baseLlmConfig, ...overrides };
+  const original = llmConfig.enabled ? createOpenAiClient(originalConfig, hooks) : null;
+  if (!gatewayPreference?.apiKey) return original;
+  const preferred = createOpenAiClient(buildPreferredConfig(originalConfig, gatewayPreference), hooks);
+  return createFallbackLlm(preferred, original, {
+    redactKey: gatewayPreference.apiKey,
+    onFallback: detail => console.warn(`GameBuddy LLM preferred gateway failed, using original: ${redactSecrets(detail, llmConfig.apiKey)}`)
+  });
+}
 let rewardGuidanceInput = null;
 let guidanceRunKey = null;
 const cardGuidanceService = new CardGuidanceService({
-  llm: llmConfig.enabled ? createOpenAiClient({ ...baseLlmConfig, thinking: 'disabled', temperature: 0.1, maxTokens: 3000 }, { timeoutMs: 60_000, onLog: publishLlmLog }) : null,
+  llm: makeLlmClient({ thinking: 'disabled', temperature: 0.1, maxTokens: 3000 }, { timeoutMs: 60_000, onLog: publishLlmLog }),
   onUpdate: message => {
     broadcast('bridge-card-guidance', message);
     if (message && bridgeSocket?.readyState === WebSocket.OPEN) bridgeSocket.send(JSON.stringify(message));
@@ -80,17 +104,19 @@ function syncCardGuidance(state, readRewardSnapshot = true) {
   } else if (cardGuidanceService.current) cardGuidanceService.clear();
 }
 const sharedDanmakuClient = new SharedDanmakuClient();
-const danmakuLlm = llmConfig.enabled
-  ? new DanmakuLlmAtmosphere({
-      llm: createOpenAiClient({
-        ...baseLlmConfig,
-        thinking: 'disabled',
-        temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
-        maxTokens: 300
-      }, { timeoutMs: 60_000, onLog: publishLlmLog }),
-      onLog: entry => console.info('[GameBuddy Danmaku]', JSON.stringify(entry))
-    })
-  : null;
+let danmakuLlm = null;
+function createDanmakuLlm(client = makeLlmClient({
+  thinking: 'disabled',
+  temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
+  maxTokens: 300
+}, { timeoutMs: 60_000, onLog: publishLlmLog })) {
+  if (!client) return null;
+  return new DanmakuLlmAtmosphere({
+    llm: client,
+    onLog: entry => console.info('[GameBuddy Danmaku]', JSON.stringify(entry))
+  });
+}
+danmakuLlm = createDanmakuLlm();
 const danmakuAdapter = new DanmakuBridgeAdapter({
   sharedClient: sharedDanmakuClient,
   llmAtmosphere: danmakuLlm
@@ -101,6 +127,7 @@ if (llmConfig.enabled) {
 } else {
   console.log('GameBuddy LLM: rules only');
 }
+if (gatewayPreference?.baseURL) console.log(`GameBuddy LLM preferred gateway: ${gatewayPreference.baseURL}`);
 let orchestrator;
 
 function rebuildFactReviews() {
@@ -120,26 +147,39 @@ function logLlmMode() {
     : 'GameBuddy LLM: rules only');
 }
 
+function rebindLlmClients() {
+  cardGuidanceService.llm = makeLlmClient({ thinking: 'disabled', temperature: 0.1, maxTokens: 3000 }, { timeoutMs: 60_000, onLog: publishLlmLog });
+  const danmakuClient = makeLlmClient({
+    thinking: 'disabled',
+    temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
+    maxTokens: 300
+  }, { timeoutMs: 60_000, onLog: publishLlmLog });
+  if (danmakuClient && !danmakuLlm) {
+    danmakuLlm = createDanmakuLlm(danmakuClient);
+    danmakuAdapter.llmAtmosphere = danmakuLlm;
+  } else if (danmakuLlm) {
+    danmakuLlm.llm = danmakuClient;
+  }
+  if (orchestrator) {
+    orchestrator.setLlm(makeLlmClient(
+      { thinking: llmThinkingEnabled ? 'enabled' : 'disabled' },
+      { onThinkingChange: updateAgentThinking, onLog: publishLlmLog }
+    ));
+  }
+}
+
 function applyLlmMode() {
-  const nextConfig = {
-    ...baseLlmConfig,
-    thinking: llmThinkingEnabled ? 'enabled' : 'disabled'
-  };
-  orchestrator.setLlm(llmConfig.enabled
-    ? createOpenAiClient(nextConfig, { onThinkingChange: updateAgentThinking, onLog: publishLlmLog })
-    : null);
-  broadcast('bridge-llm-mode', { enabled: llmConfig.enabled, thinking: llmThinkingEnabled });
+  rebindLlmClients();
+  broadcast('bridge-llm-mode', { enabled: llmConfig.enabled || Boolean(gatewayPreference?.apiKey), thinking: llmThinkingEnabled });
   logLlmMode();
 }
 
 function buildOrchestrator() {
   orchestrator = createOrchestrator({
-    llm: llmConfig.enabled
-      ? createOpenAiClient({
-          ...baseLlmConfig,
-          thinking: llmThinkingEnabled ? 'enabled' : 'disabled'
-        }, { onThinkingChange: updateAgentThinking, onLog: publishLlmLog })
-      : null,
+    llm: makeLlmClient(
+      { thinking: llmThinkingEnabled ? 'enabled' : 'disabled' },
+      { onThinkingChange: updateAgentThinking, onLog: publishLlmLog }
+    ),
     onRecommendation: publishRecommendation,
     onAgentStatus: status => broadcast('agent-status', status)
   });
@@ -643,12 +683,13 @@ function showPetContextMenu(point) {
     { label: '查看本场攻略', enabled: Boolean(cachedEncounterGuide && encounterGuideKey), click: reopenEncounterGuide },
     {
       label: `思考模式：${llmThinkingEnabled ? '开' : '关'}`,
-      enabled: llmConfig.enabled,
+      enabled: llmConfig.enabled || Boolean(gatewayPreference?.apiKey),
       click: () => {
         llmThinkingEnabled = !llmThinkingEnabled;
         applyLlmMode();
       }
     },
+    { label: '配置密钥', click: showGatewaySetup },
     {
       label: '切换形象',
       submenu: [
@@ -665,6 +706,31 @@ function showPetContextMenu(point) {
     x: Math.max(0, Math.round(Number(point?.x) || 0)),
     y: Math.max(0, Math.round(Number(point?.y) || 0))
   });
+}
+
+function showGatewaySetup() {
+  shell.openExternal(KEYS_PAGE_URL).catch(error => console.warn('GameBuddy key page failed:', error.message));
+  if (gatewayWindow && !gatewayWindow.isDestroyed()) {
+    gatewayWindow.focus();
+    return;
+  }
+  gatewayWindow = new BrowserWindow({
+    width: 440,
+    height: 390,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title: '配置密钥',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  gatewayWindow.loadFile(path.join(__dirname, 'src', 'gateway-setup.html'));
+  gatewayWindow.on('closed', () => { gatewayWindow = undefined; });
 }
 
 function connectBridge() {
@@ -999,6 +1065,21 @@ ipcMain.on('danmaku-composer-focus', (_event, enabled) => {
   }
 });
 ipcMain.on('pet-context-menu', (_event, point) => showPetContextMenu(point));
+ipcMain.handle('gateway-setup:load', () => ({
+  apiKey: gatewayPreference?.apiKey || '',
+  baseURL: gatewayPreference?.baseURL || `${DEFAULT_GATEWAY_URL}/`,
+  gatewayName: COMPANY_GATEWAY_NAME
+}));
+ipcMain.handle('gateway-setup:save', (_event, payload) => {
+  const saved = writeGatewayPreference(GATEWAY_PREFERENCE_PATH, payload);
+  if (!saved.ok) return saved;
+  gatewayPreference = saved.preference;
+  rebindLlmClients();
+  console.log(`GameBuddy LLM preferred gateway: ${gatewayPreference.baseURL}`);
+  gatewayWindow?.close();
+  return { ok: true };
+});
+ipcMain.on('gateway-setup:cancel', () => gatewayWindow?.close());
 ipcMain.on('toggle-llm-thinking', () => {
   llmThinkingEnabled = !llmThinkingEnabled;
   applyLlmMode();
