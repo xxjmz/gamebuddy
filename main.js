@@ -5,6 +5,7 @@ const WebSocket = require('ws');
 const { createObservationStore } = require('./harness/observation-store');
 const { createOrchestrator } = require('./agent/orchestrator');
 const { createOpenAiClient, readLlmConfig, redactSecrets } = require('./agent/llm/openai');
+const { reportAppStart } = require('./agent/telemetry/datong');
 const {
   KEYS_PAGE_URL,
   COMPANY_GATEWAY_NAME,
@@ -1152,6 +1153,7 @@ ipcMain.handle('refresh-recommendation', async () => {
 });
 
 app.whenReady().then(() => {
+  void reportAppStart({ userDataDir: app.getPath('userData') });
   rebuildFactReviews();
   readPetPreferences();
   applyCharacterSkin(observationStore.getState()?.run?.character);
