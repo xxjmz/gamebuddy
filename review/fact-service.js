@@ -25,12 +25,25 @@ function emptyCounters() {
     typedCardsPlayed: 0, attacksPlayed: 0,
     cardRewards: 0, cardsTaken: 0, rewardSkips: 0, unknownRewards: 0,
     shopsVisited: 0, knownGoldSpent: 0, unknownShopClosures: 0,
-    restSites: 0, smiths: 0, heals: 0, otherKnownRestActions: 0, unknownRestActions: 0
+    restSites: 0, smiths: 0, heals: 0, otherKnownRestActions: 0, unknownRestActions: 0,
+    playerHpLoss: 0, playerBlocked: 0
   };
 }
 
 function number(value) {
   return Number.isFinite(value) ? value : null;
+}
+
+function mostSeen(counts) {
+  let best = null;
+  let bestCount = 0;
+  for (const [id, count] of counts) {
+    if (count > bestCount) {
+      best = id;
+      bestCount = count;
+    }
+  }
+  return best;
 }
 
 function encounterLabel(payload) {
@@ -76,6 +89,9 @@ function summarize(runId, facts, coverage) {
   const shops = new Set();
   const rests = new Set();
   const turnDamage = new Map();
+  const damageByTarget = new Map();
+  const healCounts = new Map();
+  const blockCounts = new Map();
   let currentTurn = new Map();
   let maxTurnDamage = 0;
   let finalBossId = null;
@@ -115,6 +131,21 @@ function summarize(runId, facts, coverage) {
       const damage = Math.max(0, number(payload.hpLoss) || 0);
       turnDamage.set(key, (turnDamage.get(key) || 0) + damage);
       maxTurnDamage = Math.max(maxTurnDamage, turnDamage.get(key));
+      const target = payload.targetEntityId == null ? null : String(payload.targetEntityId);
+      if (target) {
+        const bucket = damageByTarget.get(target) || { hpLoss: 0, blocked: 0 };
+        bucket.hpLoss += damage;
+        bucket.blocked += Math.max(0, number(payload.blocked) || 0);
+        damageByTarget.set(target, bucket);
+      }
+    }
+    if (fact.eventType === 'heal.resolved' && payload.targetEntityId != null) {
+      const target = String(payload.targetEntityId);
+      healCounts.set(target, (healCounts.get(target) || 0) + 1);
+    }
+    if (fact.eventType === 'block.changed' && payload.entityId != null) {
+      const target = String(payload.entityId);
+      blockCounts.set(target, (blockCounts.get(target) || 0) + 1);
     }
     if (fact.eventType === 'card.played') {
       if (payload.cardType) counters.typedCardsPlayed += 1;
@@ -154,6 +185,12 @@ function summarize(runId, facts, coverage) {
   }
   counters.shopsVisited = shops.size;
   counters.restSites = rests.size;
+  const playerId = mostSeen(healCounts) || mostSeen(blockCounts);
+  const playerDamage = playerId ? damageByTarget.get(playerId) : null;
+  if (playerDamage) {
+    counters.playerHpLoss = playerDamage.hpLoss;
+    counters.playerBlocked = playerDamage.blocked;
+  }
   const died = ended.payload.cleared === false && ended.payload.reason !== 'abandoned';
   if (died) {
     const killer = [...openCombats.values()].sort((left, right) => (
@@ -177,7 +214,8 @@ function summarize(runId, facts, coverage) {
     ascension: number(last.ascension ?? first.ascension),
     startedAt: number(facts.find(fact => fact.eventType === 'run.started' || fact.eventType === 'run.resumed')?.occurredAt),
     endedAt: number(ended.occurredAt),
-    result: ended.payload.cleared ? 'win' : 'loss',
+    result: ended.payload.cleared ? 'win' : ended.payload.reason === 'abandoned' ? 'abandoned' : 'loss',
+    endReason: ended.payload.reason || null,
     finalAct: number(last.act),
     finalFloor: wholeRunFloor(observations),
     finalBossId,
@@ -209,6 +247,17 @@ function createFactReviewService({ filePath }) {
   }
 
   return {
+    refreshFromFacts(store) {
+      let updated=0;
+      history.runs=history.runs.map(run=>{
+        const facts=store.getEffectiveFacts(run.runId);
+        const summary=summarize(run.runId,facts,store.getCoverage(run.runId));
+        if(!summary||JSON.stringify(summary)===JSON.stringify(run))return run;
+        updated++;return summary;
+      });
+      if(updated)save();
+      return updated;
+    },
     ingestRun(runId, facts, coverage) {
       const summary = summarize(runId, facts, coverage);
       history.runs = history.runs.filter(run => run.runId !== runId);

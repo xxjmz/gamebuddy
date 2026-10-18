@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { isIronclad, scoreIroncladArchetypes } = require('../agent/knowledge/ironclad-archetypes');
 
 const SCHEMA = 'gamebuddy.review-history.v1';
 const HISTORY_LIMIT = 100;
@@ -281,39 +282,49 @@ function mainCharacter(runs) {
   return [...counts].sort((a, b) => b[1] - a[1] || runs.findIndex(run => run.character === a[0]) - runs.findIndex(run => run.character === b[0]))[0]?.[0] || null;
 }
 
+const CLEAR_DEPTH = 50;
+const FORMED_SCORE = Object.freeze({ stable: 100, operational: 70, incomplete_loop: 35, missing_starter: 0 });
+
+function round1(value) {
+  return value === null ? null : Math.round(value * 10) / 10;
+}
+
+function depthScore(run) {
+  if (run.result === 'win') return 100;
+  const floor = number(run.finalFloor);
+  return floor === null ? null : 100 * clamp(floor / CLEAR_DEPTH);
+}
+
+function formedScore(run) {
+  if (!isIronclad(run.character) || !Array.isArray(run.finalState?.deck)) return null;
+  const relics = Array.isArray(run.finalState.relics) ? run.finalState.relics : [];
+  const scored = scoreIroncladArchetypes(run.finalState.deck, relics);
+  return scored.reduce((best, row) => Math.max(best, FORMED_SCORE[row.status] ?? 0), 0);
+}
+
 function buildAxes(runs) {
-  const typed = sum(runs, 'typedCardsPlayed');
-  const attacks = sum(runs, 'attacksPlayed');
-  const skips = sum(runs, 'rewardSkips');
-  const taken = sum(runs, 'cardsTaken');
+  const depths = runs.map(depthScore).filter(value => value !== null);
   const elite = sum(runs, 'eliteEntries');
-  const normal = sum(runs, 'normalCombats');
-  const shops = sum(runs, 'shopsVisited');
+  const combats = elite + sum(runs, 'normalCombats') + sum(runs, 'bossEntries');
+  const formed = runs.map(formedScore).filter(value => value !== null);
   const spent = sum(runs, 'knownGoldSpent');
-  const finalGoldRuns = runs.filter(run => number(run?.finalState?.gold) !== null);
-  const finalGold = finalGoldRuns.reduce((total, run) => total + run.finalState.gold, 0);
-  const actsReached = runs.reduce((total, run) => total + Math.max(1, number(run.finalAct) || 1), 0);
+  const goldRuns = runs.filter(run => number(run?.finalState?.gold) !== null);
+  const finalGold = goldRuns.reduce((total, run) => total + run.finalState.gold, 0);
   const smiths = sum(runs, 'smiths');
-  const heals = sum(runs, 'heals');
-  const otherRest = sum(runs, 'otherKnownRestActions');
-  const rewardUnknown = sum(runs, 'unknownRewards');
-  const knownRewards = skips + taken;
-  const deckRuns = runs.filter(run => number(run.initialDeckSize) !== null && number(run?.finalState?.deckSize) !== null);
-  const growth = deckRuns.reduce((total, run) => total + Math.max(0, run.finalState.deckSize - run.initialDeckSize), 0);
-  const compactness = deckRuns.length ? clamp(1 - (growth / deckRuns.length) / 25) : null;
-  const skipRate = knownRewards ? skips / knownRewards : null;
-  const restraintParts = [skipRate === null ? null : { value: skipRate, weight: 0.6 }, compactness === null ? null : { value: compactness, weight: 0.4 }].filter(Boolean);
-  const restraint = restraintParts.length ? 100 * restraintParts.reduce((total, part) => total + part.value * part.weight, 0) / restraintParts.reduce((total, part) => total + part.weight, 0) : null;
-  const shopParts = [];
-  if (actsReached > 0) shopParts.push({ value: clamp(shops / actsReached), weight: 0.5 });
-  if (finalGoldRuns.length && spent + finalGold > 0) shopParts.push({ value: spent / (spent + finalGold), weight: 0.5 });
-  const shopValue = shopParts.length ? 100 * shopParts.reduce((total, part) => total + part.value * part.weight, 0) / shopParts.reduce((total, part) => total + part.weight, 0) : null;
+  const rests = smiths + sum(runs, 'heals') + sum(runs, 'otherKnownRestActions');
+  const blocked = sum(runs, 'playerBlocked');
+  const hpLoss = sum(runs, 'playerHpLoss');
+  const incoming = blocked + hpLoss;
+  const parts = [];
+  if (spent + finalGold > 0) parts.push(spent / (spent + finalGold));
+  if (rests > 0) parts.push(smiths / rests);
+  const investment = parts.length ? 100 * parts.reduce((total, part) => total + part, 0) / parts.length : null;
   return [
-    { id: 'attackPlay', label: '进攻出牌', ...ratio(attacks, typed) },
-    { id: 'cardRestraint', label: '拿牌克制', value: restraint === null ? null : Math.round(restraint * 10) / 10, numerator: skips, denominator: knownRewards, unknown: rewardUnknown },
-    { id: 'eliteChallenge', label: '精英挑战', value: elite + normal ? Math.round(1000 * clamp((elite / (elite + normal)) / 0.3)) / 10 : null, numerator: elite, denominator: elite + normal, unknown: 0 },
-    { id: 'shopSpending', label: '商店消费', value: shopValue === null ? null : Math.round(shopValue * 10) / 10, numerator: spent, denominator: spent + finalGold, unknown: sum(runs, 'unknownShopClosures') },
-    { id: 'campUpgrade', label: '火堆升级', ...ratio(smiths, smiths + heals + otherRest, sum(runs, 'unknownRestActions')) }
+    { id: 'depth', label: '深入', value: depths.length ? round1(depths.reduce((total, value) => total + value, 0) / depths.length) : null, numerator: depths.length, denominator: runs.length, unknown: runs.length - depths.length },
+    { id: 'elite', label: '精英', value: combats ? round1(100 * elite / combats) : null, numerator: elite, denominator: combats, unknown: 0 },
+    { id: 'system', label: '体系', value: formed.length ? round1(formed.reduce((total, value) => total + value, 0) / formed.length) : null, numerator: formed.length, denominator: runs.length, unknown: runs.length - formed.length },
+    { id: 'investment', label: '投入', value: round1(investment), numerator: spent + smiths, denominator: spent + finalGold + rests, unknown: sum(runs, 'unknownRestActions') + sum(runs, 'unknownShopClosures') },
+    { id: 'guard', label: '护身', value: incoming ? round1(100 * blocked / incoming) : null, numerator: blocked, denominator: incoming, unknown: 0 }
   ];
 }
 
@@ -381,23 +392,26 @@ function projectRunBuild(run) {
 }
 
 function buildDashboard(history) {
-  const all = history.runs.slice(0, DASHBOARD_LIMIT);
+  const all = history.runs.map((run,index)=>({run,index}))
+    .sort((a,b)=>(number(b.run.endedAt)||0)-(number(a.run.endedAt)||0)||a.index-b.index)
+    .slice(0,DASHBOARD_LIMIT).map(({run})=>({...run,character:String(run.character||'unknown').trim().toLowerCase()}));
   const character = mainCharacter(all);
-  const runs = character ? all.filter(run => run.character === character).slice(0, DASHBOARD_LIMIT) : [];
   const wins = all.filter(run => run.result === 'win').length;
   const losses = all.filter(run => run.result === 'loss').length;
   return {
     schema: 'gamebuddy.review-dashboard.v1',
     mainCharacter: character,
-    sampleSize: runs.length,
+    sampleSize: all.length,
+    mainCharacterSampleSize: all.filter(run=>run.character===character).length,
+    scope: 'all_characters',
     window: {
       total: all.length,
       wins,
       losses,
       abandoned: all.filter(run => run.result === 'abandoned').length
     },
-    axes: buildAxes(runs),
-    stats: buildStats(runs),
+    axes: buildAxes(all),
+    stats: buildStats(all),
     recentRuns: all.map(run => ({
       runId: run.runId,
       character: run.character,

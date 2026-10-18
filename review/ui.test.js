@@ -57,6 +57,12 @@ const unknownAxis = window.GameBuddyReviewUi.render({
   axes: dashboard.axes.map((axis, index) => index === 2 ? { ...axis, value: null } : axis)
 });
 assert.equal((unknownAxis.match(/review-radar-data/g) || []).length, 0);
+assert.match(unknownAxis,/等待精英挑战数据/);assert.doesNotMatch(unknownAxis,/再完成 0 局/);
+const universalHtml=window.GameBuddyReviewUi.render({...dashboard,sampleSize:3,mainCharacterSampleSize:2});
+assert.match(universalHtml,/全角色 · 最近 3 局/);assert.match(universalHtml,/2<small>局使用/);
+assert.equal((universalHtml.match(/review-radar-data/g)||[]).length,1);
+const abandonedHtml=window.GameBuddyReviewUi.render({...dashboard,window:{wins:1,losses:1,abandoned:1},recentRuns:[{result:'abandoned',character:'ironclad',runId:'quit'}]});
+assert.match(abandonedHtml,/review-result abandoned">放弃/);assert.match(abandonedHtml,/放弃 1 局/);assert.doesNotMatch(abandonedHtml,/review-result loss/);
 
 const hostileName = '打击<script>"&';
 const buildDashboard = {

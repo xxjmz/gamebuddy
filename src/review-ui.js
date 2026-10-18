@@ -37,6 +37,9 @@
     const axes = dashboard.axes || [];
     const enough = dashboard.sampleSize >= 3;
     const complete = enough && axes.length === 5 && axes.every(axis => Number.isFinite(axis.value));
+    const missing=axes.filter(axis=>!Number.isFinite(axis.value)).map(axis=>axis.label);
+    const pending=enough ? `已记录 ${dashboard.sampleSize} 局，等待${missing.length?escapeHtml(missing.join('、')):'更多行为'}数据`
+      : dashboard.sampleSize ? `再完成 ${Math.max(0, 3-dashboard.sampleSize)} 局即可生成五星图` : '完成对局后生成五星图';
     const valuePoints = complete
       ? axes.map((axis, index) => point(index, 115 * Math.max(0, Math.min(100, axis.value)) / 100).map(value => value.toFixed(1)).join(',')).join(' ')
       : '';
@@ -60,7 +63,7 @@
           ${complete ? `<polygon class="review-radar-data" points="${valuePoints}"></polygon>` : ''}
           ${labels}
         </svg>
-        ${complete ? '' : `<div class="review-radar-empty">${dashboard.sampleSize ? `再完成 ${Math.max(0, 3 - dashboard.sampleSize)} 局即可生成五星图` : '完成对局后生成五星图'}</div>`}
+        ${complete ? '' : `<div class="review-radar-empty">${pending}</div>`}
       </div>`;
   }
 
@@ -83,7 +86,8 @@
 
   function resultLabel(result) {
     if (result === 'win') return ['通关', 'win'];
-    return ['未通关', 'loss'];
+    if (result === 'abandoned') return ['放弃', 'abandoned'];
+    return result === 'loss' ? ['未通关', 'loss'] : ['结果未知', 'unknown'];
   }
 
   function displayName(item) {
@@ -151,6 +155,7 @@
           <div class="review-score-pill">
             <span class="review-score-number">${safe.window?.wins || 0}</span>
             <span class="review-score-copy">胜局<small>/ ${safe.window?.wins + safe.window?.losses || 0} 局有结果</small></span>
+            ${safe.window?.abandoned ? `<span class="review-abandoned-count">放弃 ${safe.window.abandoned} 局</span>` : ''}
           </div>
           <div class="review-brand"><strong>GAMEBUDDY</strong><span>个人数据</span></div>
           <div class="review-actions">
@@ -169,13 +174,13 @@
               <div class="review-character-name"><span>最近 50 局最常使用</span><strong>${escapeHtml(characterName(safe.mainCharacter))}</strong></div>
               <img src="${characterImage(character)}" alt="${escapeHtml(characterName(safe.mainCharacter))}" />
               <div class="review-character-shadow"></div>
-              <div class="review-character-stamp">${safe.sampleSize || 0}<small>局样本</small></div>
+              <div class="review-character-stamp">${safe.mainCharacterSampleSize ?? safe.sampleSize ?? 0}<small>局使用</small></div>
             </div>
           </section>
 
           <section class="review-data-panel">
             <div class="review-ribbon right"><span>PLAY STYLE</span><strong>玩法五星图</strong></div>
-            <div class="review-radar-card">${radar(safe)}</div>
+            <div class="review-radar-card">${radar(safe)}<span class="review-radar-scope">全角色 · 最近 ${safe.sampleSize || 0} 局</span></div>
             <div class="review-ribbon compact"><span>RECENT MATCHES</span><strong>最近的 50 场对局</strong></div>
             <div class="review-stats">${statRows(safe.stats)}</div>
           </section>

@@ -35,7 +35,9 @@ assert.equal(dashboard.recentRuns[0].bossName, '守护者');
 assert.equal(dashboard.recentRuns[0].deck.length, 12);
 assert.deepEqual(dashboard.recentRuns[0].deck[0], { id: 'STRIKE', name: 'STRIKE', upgraded: false });
 assert.deepEqual(dashboard.recentRuns[0].relics, []);
-assert.equal(dashboard.axes.find(axis => axis.id === 'attackPlay').value, 100);
+assert.equal(dashboard.axes.find(axis => axis.id === 'depth').value, 100);
+assert.equal(dashboard.axes.find(axis => axis.id === 'elite').value, 100);
+assert.equal(dashboard.axes.find(axis => axis.id === 'investment').value, 50);
 assert.equal(dashboard.stats.find(stat => stat.id === 'campUpgrade').value, 100);
 
 service.ingestState(state('run-2', 'silent', 3));
@@ -85,10 +87,43 @@ const aggregate = buildDashboard({
   ]
 });
 assert.equal(aggregate.mainCharacter, 'silent', 'Usage ties must prefer the most recently used character.');
-assert.equal(aggregate.stats.find(stat => stat.id === 'winRate').denominator, 1, 'Abandoned runs must not enter the win-rate denominator.');
-assert.equal(aggregate.axes.every(axis => axis.value >= 0 && axis.value <= 100), true);
-assert.equal(aggregate.axes.find(axis => axis.id === 'attackPlay').value, 100);
-assert.equal(aggregate.axes.find(axis => axis.id === 'eliteChallenge').value, 100);
+assert.equal(aggregate.stats.find(stat => stat.id === 'winRate').denominator, 3, 'All characters count; abandoned runs must not enter the win-rate denominator.');
+assert.equal(aggregate.sampleSize,4);
+assert.equal(aggregate.mainCharacterSampleSize,2);
+assert.equal(aggregate.axes.find(axis => axis.id === 'depth').value, 50);
+assert.equal(aggregate.axes.find(axis => axis.id === 'elite').value, 100);
+assert.equal(aggregate.axes.find(axis => axis.id === 'investment').value, 100);
+
+const universal=buildDashboard({runs:[
+  {character:'IRONCLAD',endedAt:1,result:'loss',counters:{...baseCounters,typedCardsPlayed:20,attacksPlayed:10}},
+  {character:'ironclad',endedAt:2,result:'abandoned',counters:{...baseCounters,typedCardsPlayed:0,attacksPlayed:0}},
+  {character:'SILENT',endedAt:3,result:'win',counters:{...baseCounters,typedCardsPlayed:10,attacksPlayed:0}}
+]});
+assert.equal(universal.sampleSize,3);assert.equal(universal.mainCharacter,'ironclad');assert.equal(universal.mainCharacterSampleSize,2);
+assert.equal(universal.axes.find(a=>a.id==='elite').value,100,'Style axes must include every character in the recent window.');
+assert.equal(universal.stats.find(a=>a.id==='winRate').value,50);
+const fifty=Array.from({length:50},(_,i)=>({runId:'recent-'+i,endedAt:100+i,character:i%2?'SILENT':'IRONCLAD',result:'loss',counters:baseCounters}));
+const recentWindow=buildDashboard({runs:[{runId:'older',endedAt:1,character:'regent',result:'win',counters:baseCounters},...fifty]});
+assert.equal(recentWindow.sampleSize,50);assert.equal(recentWindow.mainCharacter,'silent');assert.equal(recentWindow.mainCharacterSampleSize,25);
+const styled = buildDashboard({ runs: [{
+  runId: 'styled', character: 'ironclad', result: 'loss', finalFloor: 25,
+  finalState: {
+    gold: 0,
+    deck: [
+      { id: 'HELLRAISER' }, { id: 'POMMEL_STRIKE' }, { id: 'PERFECTED_STRIKE' },
+      { id: 'TWIN_STRIKE' }, { id: 'STRIKE_IRONCLAD' }
+    ],
+    relics: []
+  },
+  counters: { ...baseCounters, eliteEntries: 1, normalCombats: 3, bossEntries: 0, knownGoldSpent: 50, smiths: 1, heals: 1, playerBlocked: 6, playerHpLoss: 4 }
+}]});
+assert.deepEqual(styled.axes.map(axis => axis.label), ['深入', '精英', '体系', '投入', '护身']);
+assert.equal(styled.axes.find(axis => axis.id === 'depth').value, 50);
+assert.equal(styled.axes.find(axis => axis.id === 'elite').value, 25);
+assert.equal(styled.axes.find(axis => axis.id === 'guard').value, 60);
+assert.equal(styled.axes.find(axis => axis.id === 'investment').value, 75);
+assert.ok(styled.axes.find(axis => axis.id === 'system').value > 0);
+assert.equal(recentWindow.recentRuns[0].runId,'recent-49');assert.ok(!recentWindow.recentRuns.some(r=>r.runId==='older'));
 
 const builds = buildDashboard({
   schema: 'gamebuddy.review-history.v1',

@@ -99,6 +99,28 @@ const abandoned = summarize('abandoned-run', [
 ], { families: {} });
 assert.equal(abandoned.finalBossName, '碾碎爪');
 assert.equal(abandoned.finalEncounterKind, 'boss');
+assert.equal(abandoned.result,'abandoned');assert.equal(abandoned.endReason,'abandoned');
+service.ingestRun('abandoned-run',[...deathFacts.slice(0,-1),{eventType:'run.ended',occurredAt:10,payload:{cleared:false,reason:'abandoned'}}],{families:{}});
+assert.equal(service.getDashboard().window.abandoned,1);assert.equal(service.getDashboard().window.losses,0);
+assert.equal(service.getDashboard().stats.find(s=>s.id==='winRate').denominator,1);
+const migrationPath=path.join(directory,'migration.json');
+fs.writeFileSync(migrationPath,JSON.stringify({schema:'gamebuddy.review-history.v2',runs:[{...abandoned,result:'loss',endReason:null},{runId:'legacy-no-facts',result:'loss',character:'silent'}]}));
+const migrated=createFactReviewService({filePath:migrationPath});
+const recovery={getEffectiveFacts:id=>id==='abandoned-run'?[...deathFacts.slice(0,-1),{eventType:'run.ended',occurredAt:10,payload:{cleared:false,reason:'abandoned'}}]:[],getCoverage:()=>({families:{}})};
+assert.equal(migrated.refreshFromFacts(recovery),1);
+assert.equal(migrated.getHistory().runs[0].result,'abandoned');assert.equal(migrated.getHistory().runs[1].result,'loss');
+assert.equal(migrated.refreshFromFacts(recovery),0,'History recovery must be idempotent.');
+assert.ok(fs.existsSync(migrationPath+'.bak'));
+
+const guarded = summarize('guarded-run', [
+  observed(1, 10, 1),
+  { eventType: 'heal.resolved', combatId: 'fight', occurredAt: 2, payload: { targetEntityId: '0', amount: 6 } },
+  { eventType: 'damage.resolved', combatId: 'fight', occurredAt: 3, payload: { targetEntityId: '0', hpLoss: 4, blocked: 6 } },
+  { eventType: 'damage.resolved', combatId: 'fight', occurredAt: 4, payload: { targetEntityId: '1', hpLoss: 20, blocked: 0 } },
+  { eventType: 'run.ended', occurredAt: 5, payload: { cleared: false, reason: 'game_ended_not_cleared' } }
+], { families: { combat_resolution: { state: 'available' } } });
+assert.equal(guarded.counters.playerHpLoss, 4);
+assert.equal(guarded.counters.playerBlocked, 6);
 
 fs.rmSync(directory, { recursive: true, force: true });
 console.log('Fact review service tests passed.');
