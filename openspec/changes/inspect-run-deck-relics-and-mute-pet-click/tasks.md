@@ -30,4 +30,4 @@
 
 ## 6. Deliver the change
 
-- [ ] 6.1 检查 `git diff`，只暂存本变更实际修改的 OpenSpec、复盘 UI/服务/测试和测试脚本文件，不暂存工作区既有修改；以符合 Conventional Commits 的信息创建本地提交，并用 `git status --short` 验证未混入无关文件。
+- [x] 6.1 检查 `git diff`，只暂存本变更实际修改的 OpenSpec、复盘 UI/服务/测试和测试脚本文件，不暂存工作区既有修改；以符合 Conventional Commits 的信息创建本地提交，并用 `git status --short` 验证未混入无关文件。
