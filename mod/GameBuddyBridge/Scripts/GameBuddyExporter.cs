@@ -221,9 +221,9 @@ public static class GameBuddyExporter
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..20].ToLowerInvariant();
     }
 
-    public static void AuthoritativeRunEnded(bool cleared)
+    public static void AuthoritativeRunEnded(bool cleared, bool abandoned = false)
     {
-        _pendingRunResult = cleared ? "win" : "loss";
+        _pendingRunResult = GameBuddyRunEnding.Resolve(cleared, abandoned).Result;
         EndActiveRun();
     }
 
@@ -678,19 +678,10 @@ public static class GameBuddyExporter
             return;
         }
 
-        var cards = new List<CardModel>();
-        CollectRewardCards(screen, cards, 0);
-        var candidates = cards
-            .Where(card => card is not null && !string.IsNullOrWhiteSpace(card.Id.Entry))
-            .Take(6)
-            .ToList();
-        if (candidates.Count == 0)
-        {
-            return;
-        }
-
-        var mapped = MapCards(candidates);
-        var signature = string.Join("|", mapped.Select((card, index) => $"{index}:{card.Id}:{card.Upgraded}"));
+        var reward = snapshot.Reward;
+        if (reward is null) return;
+        var mapped = reward.Cards;
+        var signature = reward.Signature;
         if (string.Equals(signature, _lastCardRewardSignature, StringComparison.Ordinal))
         {
             return;
@@ -701,7 +692,7 @@ public static class GameBuddyExporter
             signature,
             snapshot.Player.Cards.Select(card => new RewardSelectionCard(card.Id, card.Upgraded)),
             mapped.Select(card => new RewardSelectionCard(card.Id, card.Upgraded)));
-        GameBuddyRewardOverlay.SetOffer((MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardRewardSelectionScreen)screen, signature, mapped.Select(card => card.Id));
+        GameBuddyRewardOverlay.SetOffer((MegaCrit.Sts2.Core.Nodes.Screens.CardSelection.NCardRewardSelectionScreen)screen, signature, mapped.Select(card => $"{card.Id}:{(card.Upgraded ? "1" : "0")}"));
         var factType = _rewardFactOffered ? "reward.updated" : "reward.offered";
         _rewardFactOffered = true;
         GameBuddyFactEmitter.Publish(factType, new
@@ -784,6 +775,17 @@ public static class GameBuddyExporter
         }
     }
 
+    private static RewardSnapshot? BuildRewardSnapshot()
+    {
+        if (_activeCardRewardScreen is not { } screen || !GodotObject.IsInstanceValid(screen) || !screen.IsInsideTree()) return null;
+        var cards = new List<CardModel>();
+        CollectRewardCards(screen, cards, 0);
+        var mapped = MapCards(cards.Where(card => !string.IsNullOrWhiteSpace(card.Id.Entry)).Take(6));
+        if (mapped.Count == 0) return null;
+        var signature = string.Join("|", mapped.Select((card, index) => $"{index}:{card.Id}:{card.Upgraded}"));
+        return new(mapped, signature, true);
+    }
+
     private static GameBuddyState BuildSnapshot(RunState runState, Player player)
     {
         var combat = player.PlayerCombatState;
@@ -843,7 +845,8 @@ public static class GameBuddyExporter
             combatState,
             mapSnapshot,
             BuildEventSnapshot(runState),
-            BuildShopSnapshot(runState, player));
+            BuildShopSnapshot(runState, player),
+            BuildRewardSnapshot());
     }
 
     private static ShopSnapshot? BuildShopSnapshot(RunState runState, Player player)
@@ -852,6 +855,7 @@ public static class GameBuddyExporter
         {
             if (runState.CurrentRoom is not MerchantRoom room)
             {
+                GameBuddyRewardOverlay.ClearShop();
                 return null;
             }
 
@@ -912,7 +916,10 @@ public static class GameBuddyExporter
                 }
             }
 
-            return new ShopSnapshot(player.Gold, items);
+            var fingerprint = $"{_activeRunId}|{player.Gold}|{string.Join("|", items.Select(item => $"{item.StockKey}:{item.Id}:{item.Price}:{item.Card?.Upgraded}"))}|{string.Join("|", player.Deck.Cards.Select(card => $"{card.Id.Entry}:{card.IsUpgraded}"))}|{string.Join("|", player.Relics.Select(relic => relic.Id.Entry))}";
+            var guidanceSignature = GameBuddyRewardOverlay.SetShop(fingerprint,
+                items.Where(item => item.ItemType == "card" && item.Stocked).Select(item => $"{item.Id}:{(item.Card?.Upgraded == true ? "1" : "0")}"));
+            return new ShopSnapshot(player.Gold, items, guidanceSignature);
         }
         catch (Exception ex)
         {
@@ -1331,7 +1338,8 @@ public static class GameBuddyExporter
 public sealed record BridgeMessage<T>(string Type, T Data);
 public sealed record BridgeEvent(string Type, string Name, long Timestamp, object? Data);
 
-public sealed record GameBuddyState(string Schema, long Timestamp, string Source, RunSnapshot Run, PlayerSnapshot Player, CombatSnapshot? Combat, MapSnapshot Map, EventSnapshot? Event, ShopSnapshot? Shop);
+public sealed record GameBuddyState(string Schema, long Timestamp, string Source, RunSnapshot Run, PlayerSnapshot Player, CombatSnapshot? Combat, MapSnapshot Map, EventSnapshot? Event, ShopSnapshot? Shop, RewardSnapshot? Reward = null);
+public sealed record RewardSnapshot(List<CardSnapshot> Cards, string Signature, bool CanSkip);
 public sealed record EventSnapshot(string Title, string Description, string Kind, List<EventOptionSnapshot> Options, string? EventId, string? PageId);
 public sealed record EventOptionSnapshot(int Index, string Label, string Description, bool Locked, string? OptionId);
 public sealed record RunSnapshot(
@@ -1372,7 +1380,7 @@ public sealed record CardSnapshot(
     bool StarCostX,
     string StarCostSource);
 public sealed record OwnedItemSnapshot(string Id, string Name);
-public sealed record ShopSnapshot(int Gold, List<ShopItemSnapshot> Items);
+public sealed record ShopSnapshot(int Gold, List<ShopItemSnapshot> Items, string? GuidanceSignature = null);
 public sealed record ShopItemSnapshot(int Index, string ItemType, string Id, string Name, int? Price, bool Affordable, bool Stocked, bool OnSale, string? Rarity, string? Description, CardSnapshot? Card, string? StockKey = null);
 public sealed record MapSnapshot(
     List<string> Visited,

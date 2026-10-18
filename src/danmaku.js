@@ -210,19 +210,21 @@ function showDanmaku(message) {
   const lane = Math.max(0, Math.min(2, Number(message.lane) || 0));
   item.style.setProperty('--danmaku-lane', String(lane));
   item.dataset.danmakuLane = String(lane);
-  if (message.detail?.title || message.detail?.lines?.length) {
+  const isAi = message.source === 'ai' || message.wordingSource?.source === 'ai' || message.detail?.source === 'ai';
+  const hoverDetail = isAi ? { title: message.text } : message.detail;
+  if (hoverDetail?.title || hoverDetail?.lines?.length) {
     const detail = document.createElement('span');
     detail.className = 'danmaku-detail';
     const title = document.createElement('strong');
-    title.textContent = String(message.detail.title || message.text);
+    title.textContent = String(hoverDetail.title || message.text);
     detail.append(title);
-    for (const line of message.detail.lines || []) {
+    for (const line of hoverDetail.lines || []) {
       const row = document.createElement('span');
       row.textContent = String(line);
       detail.append(row);
     }
-    const source = message.detail.source;
-    const hasSourceLine = (message.detail.lines || []).some(line => String(line).startsWith('来源：'));
+    const source = hoverDetail.source;
+    const hasSourceLine = (hoverDetail.lines || []).some(line => String(line).startsWith('来源：'));
     if (source && !hasSourceLine) {
       const row = document.createElement('span');
       row.textContent = `来源：${source === 'mod' ? 'Mod 当前行动数据' : source === 'codex' ? 'Spire Codex' : source === 'recommendation' ? 'Agent 建议' : source === 'shared' ? '其他玩家共享' : source === 'ai' ? 'AI 生成' : '内置固定模板'}`;

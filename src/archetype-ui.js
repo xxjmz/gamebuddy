@@ -150,6 +150,11 @@
   }
 
   return {
+    renderGuidance(guidance) {
+      const rows = guidance?.systems;
+      if (!Array.isArray(rows) || !rows.length) return '';
+      return `<div class="build-guidance">${rows.map(row => `<section class="build-guidance-system${row.conflict ? ' conflict' : ''}"><div class="build-guidance-heading"><strong>${escapeHtml(row.systemName)}</strong><span class="build-guidance-role">${escapeHtml(row.role)}</span></div><div class="build-guidance-line"><span class="build-guidance-label">短板</span><p>${escapeHtml(row.shortfall)}</p></div><div class="build-guidance-line build-guidance-advice"><span class="build-guidance-label">建议</span><p>${escapeHtml(row.advice)}</p></div></section>`).join('')}</div>`;
+    },
     ORDER,
     STAGE_LABELS,
     STATUS_LABELS,

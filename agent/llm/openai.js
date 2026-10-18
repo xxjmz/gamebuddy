@@ -1,4 +1,5 @@
 const { loadProjectEnv } = require('./load-env');
+const { STRATEGY_REVIEW } = require('../knowledge/build-decision-guard');
 
 const DEFAULT_BASE_URL = 'https://ai.gs88.shop';
 const DEFAULT_MODEL = 'deepseek-v4-pro';
@@ -309,6 +310,9 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
 
   return {
     enabled,
+    completeBuildGuidance: (payload, options) => completeJson(
+      require('../knowledge/card-guidance-service').GUIDANCE_PROMPT, payload, 'build_guidance', true, options
+    ),
     completeRoute: payload => completeJson(
       '你是杀戮尖塔 2 的路线顾问。每个候选是当前一个不同的可点击入口及其最佳后续路径。healthBand 按生命分为 healthy（至少 65%）、caution（高于 35% 且低于 65%）和 danger（至多 35%）；activeProfile 对应 growth、balanced、safe。safeScore、balancedScore 和 growthScore 只是启发式相对分，不是胜率或伤害预测。权衡当前生命、金币、精英收益、火堆、商店、路线灵活性、连续战斗压力和已知路径；危险血量时不能靠臆测未来回血来忽略明显风险。targetId、row、col、direction 和 displayLabel 用于唯一定位节点；四个或更多入口时必须使用“从左第 N 个”，不得笼统称为“中间”。只从给定候选里选一条，不要发明新路线或未知问号结果，不要建议出牌。即使分数相同，也要保留一个暂时首选，并说明当前证据无法拉开差距，不得宣称路线客观等价。routesTruncated 为真时承认路线枚举不完整。用 JSON 回答：{"index":0,"reason":"两句中文解释，说明安全、成长和不确定性的取舍"}。',
       payload,
@@ -325,12 +329,12 @@ function createOpenAiClient(config = readLlmConfig(), { fetchImpl = globalThis.f
       'event_choice'
     ),
     completeShop: payload => completeJson(
-      '你是杀戮尖塔 2 的商店顾问。只能从 candidates 中选择一个当前合法的完整购物清单；每个清单已经由规则层校验库存、运行时实际价格和当前金币，不得新增商品、改价或让总花费超过预算。结合完整牌组、已持有遗物和药水、药水槽、完整地图以及 threats 里的后续遭遇做取舍。knownBoss 和 knownUpcomingElites 中 exact=true 才是确定遭遇；possibleElites 只是本章可能池，不得说成下一战必遇。逐项使用 inventory.analysis 中的完整效果、优点、风险和删牌目标；卡牌 upgraded=true 时按升级后效果评价。不要为了花完金币而购物，SAVE_GOLD 是合法候选；也不要假设未知补货内容。必须一次决定本次商店要买的全部物品及删牌服务，items 的顺序就是建议购买顺序；不要要求玩家每买一件后再次分析。用 JSON 回答：{"index":0,"reason":"两句中文解释，说明整份清单的牌组提升、后续威胁和金币机会成本"}。',
+      STRATEGY_REVIEW + '你是杀戮尖塔 2 的商店顾问。只能从 candidates 中选择一个当前合法的完整购物清单；每个清单已经由规则层校验库存、运行时实际价格和当前金币，不得新增商品、改价或让总花费超过预算。结合完整牌组、已持有遗物和药水、药水槽、完整地图以及 threats 里的后续遭遇做取舍。knownBoss 和 knownUpcomingElites 中 exact=true 才是确定遭遇；possibleElites 只是本章可能池，不得说成下一战必遇。逐项使用 inventory.analysis 中的完整效果、优点、风险和删牌目标；卡牌 upgraded=true 时按升级后效果评价。不要为了花完金币而购物，SAVE_GOLD 是合法候选；也不要假设未知补货内容。必须一次决定本次商店要买的全部物品及删牌服务，items 的顺序就是建议购买顺序；不要要求玩家每买一件后再次分析。用 JSON 回答：{"index":0,"reason":"两句中文解释，说明整份清单的牌组提升、后续威胁和金币机会成本"}。',
       payload,
       'shop_choice'
     ),
     completeCardReward: payload => completeJson(
-      '你是杀戮尖塔 2 的选牌顾问。逐张核对候选牌的知识库 rank、expertSummary、goodWhen、badWhen，再与实际完整牌组、升级状态、完整遗物效果、药水效果、金币、章节、生命、完整地图和敌人机制对照。每张牌的 costs 分别描述普通能量 energy/energyX 与星费 stars/starsX，source 标识 runtime、catalog 或 unavailable；不得把星费当作普通能量，也不得把 unavailable 猜成 0。descriptionSource=runtime 表示游戏实机文本，catalog 表示同版本目录回退；contextCompleteness=partial 时不得编造缺失效果、费用或数值。判断普通卡费和能否打出时只用 energyPerTurn / maxEnergy（每回合能量）；选牌发生在战斗外，不得把上一场残留能量说成这局费用，也不得因此把 3 费牌判成打不出。knownBoss 和 knownUpcomingElites 中 exact=true 的遭遇才是已确定身份；possibleBosses 和 possibleElites 只是当前区域的可能池，绝不能说成下一战确定会遇到。地图节点没有 encounterId/encounterName 时也不得猜测具体敌人。知识库评价只是单卡先验；条件不满足时必须降低价值，已有核心协同或能针对确定机制时应提高价值。候选 upgraded 为 true 或名称以 + 结尾时，必须按升级后效果评价；knowledgeEvaluation 的 rank/expertSummary 针对未升级版本，不得单独作为 SKIP 的充分理由。候选上的 trigger 是卡面触发条件，优先于 knowledgeEvaluation.goodWhen。若 trigger 是生成状态牌，必须按牌组里实际会生成伤口/灼伤等状态牌的能力判断（见 synergy 与 deck 描述），不得因为效果会生成充能球、或牌组充能球/集中偏少而否定。充能球种类只能依据该牌或遗物自己的 description/effect 和 orbGeneration：random 或「随机生成一个充能球」是任意种类，不得因为牌组另有电击或破损核心就说成只能生成闪电球；冷却剂按不同种类计数时，随机球可以贡献多种类，不能把随机球算作单一球种。允许选择 SKIP，避免为了拿牌而拿牌。只能从候选列表中选择，不能发明卡牌、遗物、药水、敌人、机制或数值。用 JSON 回答：{"index":0,"reason":"两句中文解释，说明当前局面满足或不满足哪些拿取条件，以及相对其他选项的优势"}。',
+      STRATEGY_REVIEW + '你是杀戮尖塔 2 的选牌顾问。逐张核对候选牌的知识库 rank、expertSummary、goodWhen、badWhen，再与实际完整牌组、升级状态、完整遗物效果、药水效果、金币、章节、生命、完整地图和敌人机制对照。每张牌的 costs 分别描述普通能量 energy/energyX 与星费 stars/starsX，source 标识 runtime、catalog 或 unavailable；不得把星费当作普通能量，也不得把 unavailable 猜成 0。descriptionSource=runtime 表示游戏实机文本，catalog 表示同版本目录回退；contextCompleteness=partial 时不得编造缺失效果、费用或数值。判断普通卡费和能否打出时只用 energyPerTurn / maxEnergy（每回合能量）；选牌发生在战斗外，不得把上一场残留能量说成这局费用，也不得因此把 3 费牌判成打不出。knownBoss 和 knownUpcomingElites 中 exact=true 的遭遇才是已确定身份；possibleBosses 和 possibleElites 只是当前区域的可能池，绝不能说成下一战确定会遇到。地图节点没有 encounterId/encounterName 时也不得猜测具体敌人。知识库评价只是单卡先验；条件不满足时必须降低价值，已有核心协同或能针对确定机制时应提高价值。候选 upgraded 为 true 或名称以 + 结尾时，必须按升级后效果评价；knowledgeEvaluation 的 rank/expertSummary 针对未升级版本，不得单独作为 SKIP 的充分理由。候选上的 trigger 是卡面触发条件，优先于 knowledgeEvaluation.goodWhen。若 trigger 是生成状态牌，必须按牌组里实际会生成伤口/灼伤等状态牌的能力判断（见 synergy 与 deck 描述），不得因为效果会生成充能球、或牌组充能球/集中偏少而否定。充能球种类只能依据该牌或遗物自己的 description/effect 和 orbGeneration：random 或「随机生成一个充能球」是任意种类，不得因为牌组另有电击或破损核心就说成只能生成闪电球；冷却剂按不同种类计数时，随机球可以贡献多种类，不能把随机球算作单一球种。允许选择 SKIP，避免为了拿牌而拿牌。只能从候选列表中选择，不能发明卡牌、遗物、药水、敌人、机制或数值。用 JSON 回答：{"index":0,"reason":"两句中文解释，说明当前局面满足或不满足哪些拿取条件，以及相对其他选项的优势"}。',
       payload,
       'card_reward'
     ),

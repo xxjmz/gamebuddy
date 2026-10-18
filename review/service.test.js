@@ -38,7 +38,8 @@ assert.deepEqual(dashboard.recentRuns[0].relics, []);
 assert.equal(dashboard.axes.find(axis => axis.id === 'depth').value, 100);
 assert.equal(dashboard.axes.find(axis => axis.id === 'elite').value, 100);
 assert.equal(dashboard.axes.find(axis => axis.id === 'investment').value, 50);
-assert.equal(dashboard.stats.find(stat => stat.id === 'campUpgrade').value, 100);
+assert.equal(dashboard.stats.find(stat => stat.id === 'maxWinStreak').value, 1);
+assert.deepEqual(dashboard.stats.map(s=>s.id),['winRate','progress','eliteRun','maxWinStreak']);
 
 service.ingestState(state('run-2', 'silent', 3));
 service.ingestState(state('run-3', 'ironclad', 1));
@@ -124,6 +125,13 @@ assert.equal(styled.axes.find(axis => axis.id === 'guard').value, 60);
 assert.equal(styled.axes.find(axis => axis.id === 'investment').value, 75);
 assert.ok(styled.axes.find(axis => axis.id === 'system').value > 0);
 assert.equal(recentWindow.recentRuns[0].runId,'recent-49');assert.ok(!recentWindow.recentRuns.some(r=>r.runId==='older'));
+function streakOf(results){return buildDashboard({runs:results.map((result,i)=>({runId:'streak-'+i,endedAt:i+1,result,character:'ironclad',counters:baseCounters}))}).stats.find(s=>s.id==='maxWinStreak');}
+assert.equal(streakOf(['win','win','abandoned','win']).value,2);
+assert.equal(streakOf(['win','loss','win','win','win']).value,3);
+assert.equal(streakOf(['win','unknown','win']).value,1);
+assert.equal(streakOf([]).value,0);
+assert.equal(streakOf(Array(55).fill('win')).value,50,'Streak must respect the same last-50 window.');
+assert.equal(streakOf(['win']).kind,'count');
 
 const builds = buildDashboard({
   schema: 'gamebuddy.review-history.v1',

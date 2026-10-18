@@ -7,7 +7,7 @@ const { createMonsterDisplayName } = require('./monster-identity');
 const { buildSharedScene } = require('./shared-scene');
 const { normalizeCharacter, personalityFor } = require('./language-profile');
 const { RunMemory } = require('./run-memory');
-const { evaluateCardAlerts, evaluateShopAlerts } = require('../knowledge/archetype-key-components');
+const { evaluateCardAlerts, evaluateShopAlerts } = require('../knowledge/card-guidance-alerts');
 
 function isLiveCombat(state) {
   // 存活敌人暂时为空不等于游戏已经结束这场战斗。
@@ -505,31 +505,28 @@ class DanmakuBridgeAdapter {
       const items = Array.isArray(data.items) ? data.items : [];
       const gold = Number.isFinite(state?.player?.gold) ? state.player.gold : data.gold;
       const visitId = this.shopVisit?.id || data.visitId || 'visit';
-      const unseen = items.filter(item => {
-        const kind = item?.itemType || item?.kind;
-        const stockKey = item?.stockKey || `${kind}:${item?.id}`;
-        const identity = `key:${runId}:shop:${visitId}:object:${stockKey}`;
-        return !this.director.presentedContentKeys.has(identity);
-      });
-      const shop = evaluateShopAlerts({ character, deck, relics, gold, items: unseen });
+      const identity=(systemId,stockKey)=>`key:${runId}:shop:${visitId}:system:${systemId}:object:${stockKey}`;
+      const shop = evaluateShopAlerts({ character, deck, relics, gold, items,
+        isUnseen:(systemId,key)=>!this.director.presentedContentKeys.has(identity(systemId,key)) });
       if (!shop) return [];
-      const objectKey = shop.objectKeys.join('+');
-      return [{
+      return shop.groups.map(group=>({
         channel: 'shop',
-        text: shop.text,
-        objectKeys: shop.alerts.map(alert => `key:${runId}:shop:${visitId}:object:${alert.offer.stockKey || `${alert.offer.kind}:${alert.offer.id}`}`),
-        contentKey: `key:${runId}:shop:${visitId}:${objectKey}`
-      }];
+        text: group.text,
+        objectKeys: group.objectKeys.map(key=>identity(group.systemId,key)),
+        contentKey: `key:${runId}:shop:${visitId}:system:${group.systemId}:${[...group.objectKeys].sort().join('+')}`
+      }));
     }
     const cards = Array.isArray(event.data?.cards) ? event.data.cards : [];
     if (!cards.length) return [];
     if (name !== 'card.reward.opened' && name !== 'event.opened') return [];
     const opportunityKey = this.cardOpportunityKey(event, state, runId);
-    return evaluateCardAlerts({ character, deck, relics, cards }).map(alert => ({
+    const identity=(systemId,key)=>`key:${runId}:${opportunityKey}:system:${systemId}:object:${key}`;
+    return evaluateCardAlerts({ character, deck, relics, cards,
+      isUnseen:(systemId,key)=>!this.director.presentedContentKeys.has(identity(systemId,key)) }).map(alert => ({
       channel: 'reward',
       text: alert.text,
-      objectKeys: [alert.objectKey],
-      contentKey: `key:${runId}:${opportunityKey}:${alert.objectKey}`
+      objectKeys: alert.objectKeys.map(key=>identity(alert.systemId,key)),
+      contentKey: `key:${runId}:${opportunityKey}:system:${alert.systemId}:${[...alert.objectKeys].sort().join('+')}`
     }));
   }
 

@@ -7,6 +7,10 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyGuidancePlacement.cs" Link="GameBuddyGuidancePlacement.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRunEnding.cs" Link="GameBuddyRunEnding.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyCardGuidanceCodec.cs" Link="GameBuddyCardGuidanceCodec.cs" />
+    <Compile Include="CardGuidanceTests.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardImpactCodec.cs" Link="GameBuddyRewardImpactCodec.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyShopStock.cs" Link="GameBuddyShopStock.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRewardCandidateSelector.cs" Link="GameBuddyRewardCandidateSelector.cs" />

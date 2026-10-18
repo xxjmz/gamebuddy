@@ -69,6 +69,7 @@
 
   function statRows(stats) {
     return (stats || []).map(stat => {
+      if(stat.kind==='count')return `<div class="review-stat-row review-stat-count-row"><div class="review-stat-copy"><strong>${escapeHtml(stat.label)}</strong><span>最近 ${stat.sampleSize ?? 0} 局</span></div><span class="review-streak-rule" aria-hidden="true"></span><b>${Math.max(0,Math.round(Number(stat.value)||0))}<small> 连胜</small></b></div>`;
       const known = Number.isFinite(stat.value);
       const detail = stat.id === 'progress'
         ? (known ? `均值 · ${stat.denominator}局` : '暂无')

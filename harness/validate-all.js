@@ -30,6 +30,7 @@ const checks = [
   ['llm syntax', [path.join(__dirname, '..', 'agent', 'llm', 'openai.js')]],
   ['load-env syntax', [path.join(__dirname, '..', 'agent', 'llm', 'load-env.js')]],
   ['agent cases', [path.join(__dirname, 'validate-agent.js')]],
+  ['card guidance cases', ['--test', path.join(__dirname, '..', 'agent', 'tests', 'card-guidance.test.js'), path.join(__dirname, '..', 'agent', 'tests', 'build-strategy-policy.test.js')]],
   ['Mod shape', [path.join(__dirname, 'validate-mod.js')]]
 ];
 

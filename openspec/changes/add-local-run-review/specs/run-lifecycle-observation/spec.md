@@ -67,3 +67,10 @@ Bridge SHALL 让客户端可靠识别战斗类型、进入的房间类型、卡�
 #### Scenario: 旧消费者接收扩展状态
 - **WHEN** 状态包含新增的对局生命周期字段
 - **THEN** 原有战斗、选牌、路线和弹幕消费者 SHALL 继续工作
+
+### Requirement: Explicit abandonment survives nested end hooks
+玩家明确放弃时，桥 SHALL 发布唯一abandoned结束事实及兼容结果；Abandon内同步触发OnEnded(false) MUST NOT 先把原因降为普通失败。正常死亡和胜利 SHALL 保持原语义，异常清理不得泄漏放弃状态到下一局。
+
+#### Scenario: Nested OnEnded during Abandon
+- **WHEN** 玩家触发Abandon且该路径内部调用OnEnded(false)
+- **THEN** 该局唯一结果为abandoned；后续普通死亡仍为loss，胜利仍为win。

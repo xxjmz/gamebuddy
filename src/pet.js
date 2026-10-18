@@ -392,8 +392,10 @@ function setEncounterGuideState(state) {
   const canReopen = Boolean(state?.available && !state?.visible);
   petState.guideReopenAvailable = canReopen;
   if (canReopen) {
-    say('查看攻略');
-    speech.title = state.title ? `查看「${state.title}」的打法` : '查看本场敌人攻略';
+    if (state.kind !== 'normal') {
+      say('查看攻略');
+      speech.title = state.title ? `查看「${state.title}」的打法` : '查看本场敌人攻略';
+    }
   } else if (wasAvailable && !petState.guideVisible) {
     say(petState.cardVisible ? cardTitle.textContent : petState.live ? '我在看着这局' : '正在连接游戏');
   }

@@ -414,3 +414,20 @@ if (args.Length > 0)
     Assert(GameBuddyRewardImpactCodec.FormatDelta(0, "operational", "operational") == " 0", "Zero must be visible.");
     Console.WriteLine("GameBuddy actual JS affinity replay passed.");
 }
+CardGuidanceTests.Run();
+
+Assert(GameBuddyRunEnding.Resolve(false).Result == "loss", "Death must stay a loss.");
+GameBuddyRunEnding.EnterAbandon();
+Assert(GameBuddyRunEnding.Resolve(false).Reason == "abandoned", "Nested OnEnded(false) lost explicit abandonment.");
+GameBuddyRunEnding.EnterAbandon();
+GameBuddyRunEnding.ExitAbandon();
+Assert(GameBuddyRunEnding.Resolve(false).Result == "abandoned", "Nested finalizer cleared the outer abandonment.");
+Assert(GameBuddyRunEnding.Resolve(true).Result == "win", "Confirmed victory must remain victory.");
+GameBuddyRunEnding.ExitAbandon();
+Assert(GameBuddyRunEnding.Resolve(false).Result == "loss", "Abandon state leaked into the next death.");
+Assert(GameBuddyRunEnding.Resolve(false, true).Result == "abandoned", "Abandon postfix did not retain intent.");
+try { GameBuddyRunEnding.EnterAbandon(); throw new Exception("test"); }
+catch { }
+finally { GameBuddyRunEnding.ExitAbandon(); }
+Assert(GameBuddyRunEnding.Resolve(false).Result == "loss", "Exception cleanup leaked abandonment state.");
+Console.WriteLine("Explicit abandonment and nested run-end ordering passed.");

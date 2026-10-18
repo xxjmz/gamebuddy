@@ -30,9 +30,10 @@ for (const marker of ['127.0.0.1', '27182', 'gamebuddy.state.v1', 'DebugOnlyGetS
 }
 
 const rewardOverlay = fs.readFileSync(path.join(root, 'Scripts', 'GameBuddyRewardOverlay.cs'), 'utf8');
-for (const marker of ['GameBuddyRewardCandidateSelector.Resolve', 'GuiInput +=', 'DistanceSquaredTo']) {
+for (const marker of ['GameBuddyRewardCandidateSelector.Resolve', 'Context.Accepts', 'GameBuddyCardGuidanceCodec.TryParse', 'DistanceSquaredTo', 'holder?.Hitbox', 'holder?.CardNode', 'ContainsPointer(x.Visual!)', 'candidateKeys.Distinct']) {
   if (!rewardOverlay.includes(marker)) throw new Error(`Reward overlay is missing candidate marker: ${marker}`);
 }
+if (!exporter.includes('BuildRewardSnapshot()') || !exporter.includes('RewardSnapshot? Reward = null')) throw new Error('Active reward must survive reconnect through snapshots');
 if (rewardOverlay.includes('Grow(24')) {
   throw new Error('Reward overlay must not use expanded overlapping rectangles for candidate detection');
 }

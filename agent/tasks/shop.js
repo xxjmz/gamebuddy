@@ -1,4 +1,5 @@
-const { decorateIroncladArchetypes } = require('../knowledge/ironclad-archetypes');
+const { decorateCardGuidance: decorateIroncladArchetypes, buildStrategyContext, evaluateBuildPolicy, evaluateRemoval, idOf, cards:cardCatalog } = require('../knowledge/card-guidance');
+const { planAllowed, planDecisionReason } = require('../knowledge/build-decision-guard');
 const { SCHEMA } = require('../recommendation');
 const { createSpireCodexClient, normalizeKey, stripMarkup } = require('../knowledge/spire-codex');
 const { lookupRelic, lookupPotion } = require('../codex-db');
@@ -90,8 +91,10 @@ function namedThreats(knowledge) {
   };
 }
 
-function removeTarget(deck) {
-  const candidates = (deck || []).map((card, index) => {
+function removeTarget(deck, {character,relics=[]} = {}) {
+  character=character || deck.map(c=>cardCatalog.get(idOf(c))?.color).find(c=>['ironclad','silent','defect','regent','necrobinder'].includes(c));
+  const candidates = (deck || []).map((raw, index) => {
+    const card=typeof raw==='string'?{id:raw,name:cardCatalog.get(idOf(raw))?.name || raw}:raw;
     const name = card.name || card.id || `第 ${index + 1} 张牌`;
     const text = `${card.id || ''} ${name} ${card.type || card.type_key || ''}`;
     let score = 20;
@@ -100,17 +103,20 @@ function removeTarget(deck) {
       score += 90;
       reasons.push('诅咒会持续污染抽牌');
     }
-    if (/strike|打击/i.test(text)) {
+    const id=idOf(card);
+    const policy=evaluateRemoval(character,deck,relics,card);
+    if (policy.protected) return null;
+    if (/^STRIKE_(IRONCLAD|SILENT|DEFECT|REGENT|NECROBINDER)$/.test(id) || /^(?:打击|Strike)\+?$/i.test(name)) {
       score += 48;
       reasons.push('起手攻击的后期效率通常偏低');
     }
-    if (/defend|防御/i.test(text)) {
+    if (/^DEFEND_(IRONCLAD|SILENT|DEFECT|REGENT|NECROBINDER)$/.test(id) || /^(?:防御|Defend)\+?$/i.test(name)) {
       score += 42;
       reasons.push('起手防御会稀释更高效的防御循环');
     }
     if (card.upgraded === true || /\+$/.test(name)) score -= 22;
     return { index, id: card.id || name, name, score, reason: reasons[0] || '删除后可以提高核心牌的抽取稳定性' };
-  }).sort((left, right) => right.score - left.score || left.index - right.index);
+  }).filter(Boolean).sort((left, right) => right.score - left.score || left.index - right.index);
   return candidates[0] || null;
 }
 
@@ -213,7 +219,9 @@ function analyzeItems(shop, state, knowledge) {
   const threats = upcomingThreats(state, { context: {} });
   const tags = threatTags(knowledge, threats);
   const cardByKey = new Map((knowledge.cards || []).map(card => [normalizeKey(card.id || card.name), card]));
-  const target = removeTarget(knowledge.deckCards || state?.player?.cards || []);
+  const deck=knowledge.deckCards || state?.player?.cards || [];
+  const ownedRelics=knowledge.relics || state?.player?.relics || [];
+  const target = removeTarget(deck,{character:state.run?.character,relics:ownedRelics});
   return shop.items.map(item => {
     const base = {
       index: item.index,
@@ -229,11 +237,13 @@ function analyzeItems(shop, state, knowledge) {
     if (item.itemType === 'card') {
       const card = cardByKey.get(normalizeKey(item.id || item.name)) || { ...(item.card || {}), id: item.id, name: item.name, description: item.description };
       const rawAnalysis = analyzeCard(card, state, context, threats, null, tags);
-      const [analysis] = decorateIroncladArchetypes(state.run?.character, state.player?.cards || [], state.player?.relics || [], [rawAnalysis]);
+      const [analysis] = decorateIroncladArchetypes(state.run?.character, deck, ownedRelics, [rawAnalysis],{hp:state.player?.hp,maxHp:state.player?.maxHp});
       return { ...base, score: item.price === null ? 0 : priceAdjustedScore(analysis.score + 4, item.price, 'card', item.onSale), analysis: { ...analysis, effect: analysis.description } };
     }
     if (item.itemType === 'relic') {
       const analysis = analyzeRelic(item, state, knowledge, threats, tags);
+      analysis.buildPolicy=evaluateBuildPolicy(state.run?.character,deck,ownedRelics,{...item,description:analysis.effect},{kind:'relic',hp:state.player?.hp,maxHp:state.player?.maxHp});
+      if(analysis.buildPolicy.conflicts.length)analysis.cons=[...(analysis.cons||[]),analysis.buildPolicy.summary];
       return { ...base, score: item.price === null ? 0 : priceAdjustedScore(analysis.raw, item.price, 'relic', item.onSale), analysis };
     }
     if (item.itemType === 'potion') {
@@ -247,12 +257,13 @@ function analyzeItems(shop, state, knowledge) {
       cons: target ? [] : ['没有找到明确值得删除的牌'],
       removeTarget: target
     };
+    if(!target)analysis.buildPolicy={blocked:true,disposition:'avoid',conflicts:[],summary:'没有可确认适合删除且不破坏核心配合的目标。'};
     return { ...base, score: item.price === null ? 0 : priceAdjustedScore(raw, item.price, 'service', item.onSale), analysis };
   });
 }
 
 function combinations(items, gold, maxItems = 3) {
-  const legal = items.filter(item => item.affordable && item.stocked && Number.isFinite(item.price) && item.price <= gold)
+  const legal = items.filter(item => item.affordable && item.stocked && !item.analysis?.buildPolicy?.blocked && Number.isFinite(item.price) && item.price <= gold)
     .sort((left, right) => right.score - left.score || left.price - right.price)
     .slice(0, 12);
   const output = [];
@@ -391,6 +402,8 @@ function recommendationFor(plan, plans, analyses, shop, state, knowledge, source
 
 function promptPayload(plans, analyses, shop, state, knowledge) {
   return {
+    strategyContext:buildStrategyContext(state.run?.character,knowledge.deckCards || state.player?.cards || [],knowledge.relics || state.player?.relics || []),
+    allowedIndexes:plans.map((plan,index)=>planAllowed(plan)?index:null).filter(index=>index!==null),
     player: {
       act: state?.run?.act,
       floor: state?.run?.floor,
@@ -461,7 +474,7 @@ async function recommendShop(observation, { llm, now = Date.now(), codex = codex
     try {
       const candidates = plans.slice(0, 10);
       const pick = await llm.completeShop(promptPayload(candidates, analyses, shop, state, knowledge));
-      if (Number.isInteger(pick?.index) && candidates[pick.index]) {
+      if (Number.isInteger(pick?.index) && candidates[pick.index] && planAllowed(candidates[pick.index])) {
         chosen = candidates[pick.index];
         source = 'llm';
         reason = pick.reason?.trim() || ruleReason(chosen, shop, threats);
@@ -470,6 +483,7 @@ async function recommendShop(observation, { llm, now = Date.now(), codex = codex
       // Rule plan remains valid when model review is unavailable.
     }
   }
+  reason=planDecisionReason(chosen,reason);
   return recommendationFor(chosen, plans, analyses, shop, state, knowledge, source, reason, now);
 }
 

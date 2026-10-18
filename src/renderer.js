@@ -20,6 +20,11 @@ const state = {
 const viewContainer = document.querySelector('#view-container');
 const toast = document.querySelector('#toast');
 const archetypeUi = window.GameBuddyArchetypeUi;
+let currentCardGuidance = null;
+function buildGuidanceFor(card) {
+  const upgraded = Boolean(card?.upgraded || card?.isUpgraded || /\+$/.test(card?.name || ''));
+  return currentCardGuidance?.cards.find(c => c.cardId === card?.id && c.upgraded === upgraded) || card?.buildGuidance;
+}
 let toastTimer;
 
 function showToast(message) {
@@ -215,14 +220,14 @@ function shopView() {
       const cons = (analysis.cons || []).slice(0, 2).map(text => `<li>${escapeHtml(text)}</li>`).join('');
       const price = Number.isFinite(item.price) ? `${item.price} 金币` : '价格未读取';
       const affordable = item.affordable === true || (Number.isFinite(item.price) && item.price <= (state.shop?.gold ?? state.player.gold ?? 0));
-      const status = item.stocked === false ? '已售出' : !affordable ? '金币不足' : item.onSale ? '折扣' : '在售';
-      return `<article class="draft-card shop-item ${recommended ? 'top-pick' : ''}">
+      const status = item.stocked === false ? '已售出' : analysis.buildPolicy?.blocked ? '不适合当前路线' : !affordable ? '金币不足' : item.onSale ? '折扣' : '在售';
+      return `<article tabindex="0" class="draft-card shop-item ${recommended ? 'top-pick' : ''}">
         <div class="draft-card-head"><span class="pick-tag">${recommended ? '清单' : escapeHtml(status)}</span><strong>${Number.isFinite(item.score) ? item.score : '--'}</strong></div>
         <div class="card-name">${escapeHtml(item.name || item.id)}</div>
         <div class="draft-card-meta">${escapeHtml(typeLabels[item.itemType] || item.itemType)} · ${escapeHtml(price)}${item.rarity ? ` · ${escapeHtml(item.rarity)}` : ''}</div>
         <p>${escapeHtml(effect)}</p>
         ${pros || cons ? `<ul class="draft-notes">${pros}${cons}</ul>` : ''}
-        ${archetypeUi?.renderCardImpacts(analysis.archetypeImpacts, analysis.archetypeScores) || ''}
+        ${archetypeUi?.renderGuidance(buildGuidanceFor({ ...analysis, ...item.card, id: item.id })) || ''}
       </article>`;
     }).join('')
     : `<div class="data-empty large-empty">${state.shop ? '当前已没有仍在售的商品；进店时生成的购物清单仍保留在右侧。' : '进入商店后，Mod 会同步全部在售卡牌、遗物、药水和删牌服务。'}</div>`;
@@ -246,7 +251,7 @@ function draftView() {
   const primaryId = rec?.primary?.action === 'TAKE_CARD' ? String(rec.primary.cardId) : '';
   const skipPick = rec?.primary?.action === 'SKIP';
   const archetypeScores = options.find(card => Array.isArray(card.archetypeScores))?.archetypeScores || [];
-  const archetypeOverview = archetypeUi?.renderOverview(archetypeScores) || '';
+  const archetypeOverview = '';
   const cardHtml = options.map((card, index) => {
     const id = String(card.id || card.name || index);
     const recommended = primaryId && id === primaryId;
@@ -262,9 +267,9 @@ function draftView() {
     const knowledgeHtml = knowledge
       ? `<div class="card-knowledge"><div class="knowledge-head"><span>${escapeHtml(knowledge.rank || '未评级')}</span><strong>${escapeHtml(knowledge.sourceName || 'GameBuddy')}</strong></div><p>${escapeHtml(knowledge.expertSummary || '')}</p><div class="knowledge-condition good">适合：${escapeHtml((knowledge.goodWhen || []).slice(0, 2).join('；'))}</div><div class="knowledge-condition bad">慎拿：${escapeHtml((knowledge.badWhen || []).slice(0, 2).join('；'))}</div>${knowledge.sourceTimestamp ? `<div class="knowledge-source">${escapeHtml(knowledge.gameVersion || '')} · 来源时间点 ${escapeHtml(knowledge.sourceTimestamp)}</div>` : `<div class="knowledge-source">${escapeHtml(knowledge.gameVersion || '')} · 无专家时间点，使用社区/机制综合评价</div>`}</div>`
       : '';
-    const impactHtml = archetypeUi?.renderCardImpacts(card.archetypeImpacts, card.archetypeScores) || '';
-    return `<article class="draft-card ${recommended ? 'top-pick' : ''}" data-card="${escapeHtml(card.name || card.id)}">
-      <div class="draft-card-head"><span class="pick-tag">${recommended ? '首选' : rec ? `第 ${index + 1} 位` : '分析中'}</span><strong>${Number.isFinite(card.score) ? card.score : '--'}</strong></div>
+    const impactHtml = archetypeUi?.renderGuidance(buildGuidanceFor(card)) || '';
+    return `<article tabindex="0" class="draft-card ${recommended ? 'top-pick' : ''}" data-card="${escapeHtml(card.name || card.id)}">
+      <div class="draft-card-head"><span class="pick-tag">${card.buildPolicy?.blocked ? '不适合当前路线' : recommended ? '首选' : rec ? `第 ${index + 1} 位` : '分析中'}</span><strong>${Number.isFinite(card.score) ? card.score : '--'}</strong></div>
       ${impactHtml}
       <div class="card-name">${escapeHtml(card.name || card.id)}</div>
       <div class="draft-card-meta">${escapeHtml(card.type || '未知')} · ${escapeHtml(card.rarity || '未知')} · ${card.cost === null ? 'X' : escapeHtml(card.cost ?? '?')} 费</div>
@@ -501,6 +506,8 @@ function setBridgeStatus(status) {
 }
 
 function applyBridgeState(next) {
+  if ((next.run?.character && next.run.character !== state.run.character) || (next.run?.runId && next.run.runId !== state.run.runId)
+    || (next.player?.cards && JSON.stringify(next.player.cards) !== JSON.stringify(state.player.cards))) currentCardGuidance = null;
   if (next.run) state.run = { ...state.run, ...next.run };
   if (next.player) state.player = { ...state.player, ...next.player };
   state.map = next.map || { visited: [] };
@@ -552,6 +559,7 @@ window.gamebuddyBridge?.onReviewChanged(dashboard => {
   if (state.mode === 'review') render();
 });
 window.gamebuddyBridge?.onEvent(event => {
+  if (['card.reward.opened', 'card.reward.closed', 'card.reward.selected', 'shop.opened', 'shop.updated', 'shop.closed', 'map.opened', 'combat.started'].includes(event.name)) currentCardGuidance = null;
   if (state.mode === 'review') return;
   if (event.name === 'card.reward.opened') {
     state.reward = event.data || null;
@@ -614,7 +622,12 @@ window.gamebuddyBridge?.onEvent(event => {
     showToast('已离开商店');
   }
 });
-window.gamebuddyBridge?.onArchetypeMilestone(showArchetypeMilestone);
+window.gamebuddyBridge?.onCardGuidance?.(message => {
+  if (message && ((message.context === 'reward' && state.reward?.signature && state.reward.signature !== message.signature)
+    || (message.context === 'shop' && state.shop?.guidanceSignature && state.shop.guidanceSignature !== message.signature))) return;
+  currentCardGuidance = message;
+  if (state.mode === 'draft' || state.mode === 'shop') render();
+});
 window.gamebuddyBridge?.onRecommendation(recommendation => {
   if (!recommendation) {
     state.recommendation = null;

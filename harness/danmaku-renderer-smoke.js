@@ -66,7 +66,8 @@ app.whenReady().then(async () => {
     ['necrobinder', '亡灵契约师', '别紧张，骨头通常很有耐心。']
   ];
   for (const [index, [character, speaker, text]] of preview.entries()) {
-    window.webContents.send('bridge-danmaku', { id: `preview-${index}`, character, speaker, source: 'ai', text });
+    window.webContents.send('bridge-danmaku', { id: `preview-${index}`, character, speaker, source: 'ai', text,
+      detail:{title:'人格提示词解释',source:'ai',lines:['提示词：展示当前场景与生成解释','来源：AI 生成']} });
   }
   window.webContents.send('bridge-danmaku', { id: 'preview-skill', character: 'ironclad', source: 'monster_skill',
     skillLabel: '小啃兽（2） · 顶撞', text: '没什么，我只是要狠狠地给你来一下。',
@@ -77,11 +78,16 @@ app.whenReady().then(async () => {
     skill: document.querySelector('.danmaku-skill .danmaku-speaker').textContent,
     skillAvatars: document.querySelectorAll('.danmaku-skill img').length,
     detail: document.querySelector('.danmaku-skill .danmaku-detail').textContent
+    ,aiDetail:[...document.querySelectorAll('[data-source="ai"] .danmaku-detail')].map(e=>e.textContent)
   })`);
   assert.deepEqual(labels.ai, preview.map(item => item[1]));
   assert.match(labels.skill, /技能.*小啃兽（2）.*顶撞/);
   assert.equal(labels.skillAvatars, 0);
   assert.match(labels.detail, /Mod 当前行动数据/);
+  assert.deepEqual(labels.aiDetail,preview.map(item=>item[2]));
+  assert.doesNotMatch(labels.aiDetail.join(''),/提示词|生成解释|来源：/);
+  await window.webContents.executeJavaScript("document.querySelector('[data-source=ai]').classList.add('hovered')");
+  assert.equal(await window.webContents.executeJavaScript("getComputedStyle(document.querySelector('[data-source=ai] .danmaku-detail')).display"),'block');
   // 仅在预览中暂停飞行并排成纵列，便于目视检查真实组件和悬停详情。
   await window.webContents.executeJavaScript(`
     document.body.style.background = '#0b141a';
@@ -155,6 +161,21 @@ app.whenReady().then(async () => {
   await window.webContents.executeJavaScript('document.fonts.ready.then(() => new Promise(resolve => setTimeout(resolve, 300)))');
   fs.writeFileSync(shopScreenshot, (await window.webContents.capturePage()).toPNG());
   console.log(`Nullable shop accepted; core card/relic rendered without repeating advice: ${shopScreenshot}`);
+  window.webContents.send('bridge-danmaku-clear', {});await waitForCount(0);
+  const supportAdapter=new DanmakuBridgeAdapter({now:()=>now});supportAdapter.director.counter=500;
+  const supportState={...live,run:{...live.run,character:'silent'},player:{...live.player,cards:[],gold:200}};
+  supportAdapter.syncKeyComponents({name:'shop.opened',data:{visitId:'support-renderer',items:[
+    {itemType:'card',id:'PIERCING_WAIL',stockKey:'card:0',price:24},
+    {itemType:'card',id:'ABRASIVE',stockKey:'card:1',price:144}
+  ]}},supportState,'support-run');
+  for(let i=0;i<2;i++){
+    now+=1000;const [message]=supportAdapter.tick();assert.ok(message);
+    window.webContents.send('bridge-danmaku',{...message,character:'silent'});await waitForCount(i+1);
+  }
+  const supportTexts=await window.webContents.executeJavaScript("[...document.querySelectorAll('[data-source=key_component] .gb-danmaku__text')].map(e=>e.textContent)");
+  assert.equal(supportTexts.length,2);assert.ok(supportTexts.some(t=>/敏捷防线/.test(t)&&/尖啸/.test(t)&&/磨蚀/.test(t)));
+  assert.ok(supportTexts.some(t=>/弃牌周转/.test(t)&&/磨蚀/.test(t)));
+  console.log('Support cards grouped by system rendered without cross-system suppression.');
   clearTimeout(timeout);
   window.destroy();
   app.exit(0);

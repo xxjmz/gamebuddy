@@ -376,7 +376,7 @@ test('关键组件按机会和对象去重，优先于人格弹幕且不丢掉�
   adapter.syncKeyComponents(reward, live, 'run-key');
   assert.equal(adapter.director.queue.filter(item => item.source === 'key_component').length, 1);
   assert.equal(adapter.director.queue[0].displayPriority, 7);
-  assert.equal(adapter.director.queue[0].contentKey, 'key:run-key:reward:1:card:HELLRAISER:false');
+  assert.equal(adapter.director.queue[0].contentKey, 'key:run-key:reward:1:system:ironclad:auto-strike:card:HELLRAISER:false');
   adapter.director.queue.push({
     ...adapter.director.context,
     id: 'skill-kept',

@@ -8,10 +8,9 @@ const { createOpenAiClient, readLlmConfig } = require('./agent/llm/openai');
 const { ensureMapRoutes, routeChoiceCount } = require('./agent/tasks/route');
 const { decide } = require('./agent/router');
 const { recordDecision } = require('./agent/recorder');
-const { decorateIroncladArchetypes } = require('./agent/knowledge/ironclad-archetypes');
-const { draftImpactMessage } = require('./agent/knowledge/auto-strike');
-const { createArchetypeMilestoneTracker } = require('./src/archetype-milestone');
-const { encounterGuideSignature, buildEncounterGuide } = require('./agent/tasks/encounter-guide');
+const { decorateCardGuidance, hash: guidanceHash } = require('./agent/knowledge/card-guidance');
+const { CardGuidanceService, rewardGuidanceFromState } = require('./agent/knowledge/card-guidance-service');
+const { encounterGuideSignature, buildEncounterGuide, shouldAutoOpenEncounterGuide } = require('./agent/tasks/encounter-guide');
 const { DanmakuBridgeAdapter } = require('./agent/danmaku/bridge-adapter');
 const { SharedDanmakuClient } = require('./agent/danmaku/shared-client');
 const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
@@ -21,7 +20,6 @@ const fs = require('node:fs');
 
 const BRIDGE_URL = process.env.GAMEBUDDY_BRIDGE_URL || 'ws://127.0.0.1:27182';
 const BRIDGE_MODE = process.env.GAMEBUDDY_BRIDGE_MODE === 'replay' ? 'replay' : 'game';
-const archetypeMilestones = createArchetypeMilestoneTracker();
 let mainWindow;
 let reviewWindow;
 let petWindow;
@@ -53,9 +51,34 @@ const FACT_REVIEW_HISTORY_PATH = process.env.GAMEBUDDY_FACT_REVIEW_FILE || path.
 const FACTS_ROOT_PATH = process.env.GAMEBUDDY_FACTS_DIR || path.join(app.getPath('userData'), 'facts', 'v1');
 const reviewService = createFactReviewService({ filePath: FACT_REVIEW_HISTORY_PATH });
 const factStore = createLocalFactStore({ rootDir: FACTS_ROOT_PATH });
+reviewService.refreshFromFacts(factStore);
 let reviewClearToken = null;
 const llmConfig = readLlmConfig();
 const baseLlmConfig = { ...llmConfig };
+let rewardGuidanceInput = null;
+let guidanceRunKey = null;
+const cardGuidanceService = new CardGuidanceService({
+  llm: llmConfig.enabled ? createOpenAiClient({ ...baseLlmConfig, thinking: 'disabled', temperature: 0.1, maxTokens: 3000 }, { timeoutMs: 60_000, onLog: publishLlmLog }) : null,
+  onUpdate: message => {
+    broadcast('bridge-card-guidance', message);
+    if (message && bridgeSocket?.readyState === WebSocket.OPEN) bridgeSocket.send(JSON.stringify(message));
+  },
+  onLog: entry => console.info('[GameBuddy guidance]', JSON.stringify(entry))
+});
+function syncCardGuidance(state, readRewardSnapshot = true) {
+  if (!state) return;
+  const common = { runId: state.run?.runId || agentRunId, character: state.run?.character, deck: state.player?.cards || [], relics: state.player?.relics || [], decisionState:{hp:state.player?.hp,maxHp:state.player?.maxHp} };
+  const runKey = `${common.runId || ''}:${common.character || ''}`;
+  if (guidanceRunKey && guidanceRunKey !== runKey) { rewardGuidanceInput = null; cardGuidanceService.clear(); }
+  guidanceRunKey = runKey;
+  if (readRewardSnapshot) rewardGuidanceInput = rewardGuidanceFromState(state,rewardGuidanceInput);
+  if (state.shop && !state.combat) {
+    const candidates = (state.shop.items || []).filter(i => i.itemType === 'card' && i.stocked !== false).map(i => ({ ...i.card, id: i.id, name: i.name, stockKey: i.stockKey }));
+    cardGuidanceService.update({ ...common, candidates, context: 'shop', signature: state.shop.guidanceSignature || guidanceHash([state.run?.runId, state.run?.floor, state.shop.gold, state.shop.items]) });
+  } else if (rewardGuidanceInput && !state.combat) {
+    cardGuidanceService.update({ ...common, ...rewardGuidanceInput });
+  } else if (cardGuidanceService.current) cardGuidanceService.clear();
+}
 const sharedDanmakuClient = new SharedDanmakuClient();
 const danmakuLlm = llmConfig.enabled
   ? new DanmakuLlmAtmosphere({
@@ -492,25 +515,21 @@ function handleAcceptedEvent(event) {
       ...event,
       data: {
         ...event.data,
-        cards: decorateIroncladArchetypes(
+        cards: decorateCardGuidance(
           liveState?.run?.character,
           liveState?.player?.cards || [],
           liveState?.player?.relics || [],
-          event.data.cards
+          event.data.cards,
+          { hp:liveState?.player?.hp, maxHp:liveState?.player?.maxHp }
         )
       }
     }
     : event;
   broadcast('bridge-event', displayEvent);
-  if (event.name === 'card.reward.selected') {
-    const milestone = archetypeMilestones.confirm(event.data);
-    if (milestone) broadcast('bridge-archetype-milestone', milestone);
-  }
-  const impactMessage = draftImpactMessage(event, liveState?.run?.character, displayEvent.data?.cards);
-  if (impactMessage) archetypeMilestones.cache(impactMessage);
-  if (impactMessage && bridgeSocket?.readyState === WebSocket.OPEN) {
-    bridgeSocket.send(JSON.stringify(impactMessage));
-  }
+  if (event.name === 'card.reward.opened' && event.data?.signature) rewardGuidanceInput = { context: 'reward', signature: event.data.signature, candidates: event.data.cards || [] };
+  if (['card.reward.selected', 'card.reward.closed', 'map.opened', 'combat.started', 'shop.opened', 'run.started', 'run.ended'].includes(event.name)) rewardGuidanceInput = null;
+  if (event.name === 'shop.closed') cardGuidanceService.clear();
+  else syncCardGuidance(liveState,!['card.reward.selected','card.reward.closed','map.opened','combat.started','run.ended'].includes(event.name));
   if (event.name === 'combat.ended') {
     clearEncounterGuide();
     hideDanmakuAfter();
@@ -592,6 +611,13 @@ async function considerEncounterGuide(state) {
   const guide = await buildEncounterGuide(state);
   if (encounterGuideKey !== key || dismissedEncounterGuideKey === key || !guide) return;
   cachedEncounterGuide = guide;
+  if (!shouldAutoOpenEncounterGuide(guide)) {
+    activeEncounterGuide = null;
+    syncPetWindowSize();
+    petWindow?.webContents.send('bridge-encounter-guide', null);
+    publishEncounterGuideState();
+    return;
+  }
   activeEncounterGuide = guide;
   syncPetWindowSize();
   keepPetVisible();
@@ -614,6 +640,7 @@ function showPetContextMenu(point) {
   }));
   const menu = Menu.buildFromTemplate([
     { label: '个人数据', click: () => { showPersonalData(); keepPetVisible(); } },
+    { label: '查看本场攻略', enabled: Boolean(cachedEncounterGuide && encounterGuideKey), click: reopenEncounterGuide },
     {
       label: `思考模式：${llmThinkingEnabled ? '开' : '关'}`,
       enabled: llmConfig.enabled,
@@ -700,6 +727,7 @@ function connectBridge() {
           if (!routableState.combat && routeChoiceCount(routableState) <= 1) clearAgentThinking('map_route');
           recordDecision({ runId: agentRunId, observation: { ...observation, state: routableState }, decision: observation.decision });
           broadcast('bridge-state', routableState);
+          syncCardGuidance(routableState);
           sendHighlightRoute(observation.decision, routableState);
           void considerEncounterGuide(routableState);
           for (const event of result.derivedEvents || []) handleAcceptedEvent(event);
@@ -734,6 +762,8 @@ function connectBridge() {
     clearEncounterGuide();
     clearCardRecommendation();
     clearDanmaku();
+    rewardGuidanceInput = null;
+    cardGuidanceService.clear();
     broadcastBridgeStatus('waiting', '等待本地 Mod Bridge');
     clearTimeout(bridgeReconnectTimer);
     bridgeReconnectTimer = setTimeout(connectBridge, 2500);

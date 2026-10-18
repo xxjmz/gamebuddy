@@ -60,16 +60,24 @@ public static class GameBuddyLifecyclePatches
     public static void EndedPostfix(object[] __args)
     {
         var cleared = __args.OfType<bool>().FirstOrDefault();
+        var ending = GameBuddyRunEnding.Resolve(cleared);
         GameBuddyExporter.PublishFinalFactObservation();
-        GameBuddyFactEmitter.EndRun(cleared, cleared ? "game_ended_victory" : "game_ended_not_cleared");
-        GameBuddyExporter.AuthoritativeRunEnded(cleared);
+        GameBuddyFactEmitter.EndRun(cleared, ending.Reason);
+        GameBuddyExporter.AuthoritativeRunEnded(cleared, ending.Result == "abandoned");
     }
 
     public static void AbandonedPostfix()
     {
         GameBuddyExporter.PublishFinalFactObservation();
         GameBuddyFactEmitter.EndRun(false, "abandoned");
-        GameBuddyExporter.AuthoritativeRunEnded(false);
+        GameBuddyExporter.AuthoritativeRunEnded(false, true);
+    }
+
+    public static void AbandonPrefix() => GameBuddyRunEnding.EnterAbandon();
+    public static Exception? AbandonFinalizer(Exception? __exception)
+    {
+        GameBuddyRunEnding.ExitAbandon();
+        return __exception;
     }
 
     private static bool PatchNamed(Harmony harmony, Type type, string name, string patchName, string modDirectory)
@@ -83,7 +91,10 @@ public static class GameBuddyLifecyclePatches
             return false;
         }
         var patch = new HarmonyMethod(typeof(GameBuddyLifecyclePatches), patchName);
-        foreach (var method in methods) harmony.Patch(method, postfix: patch);
+        foreach (var method in methods)
+            harmony.Patch(method, postfix: patch,
+                prefix: patchName == nameof(AbandonedPostfix) ? new HarmonyMethod(typeof(GameBuddyLifecyclePatches), nameof(AbandonPrefix)) : null,
+                finalizer: patchName == nameof(AbandonedPostfix) ? new HarmonyMethod(typeof(GameBuddyLifecyclePatches), nameof(AbandonFinalizer)) : null);
         GameBuddyDiagnostics.Write(modDirectory, $"lifecycle hook applied: {type.FullName}.{name} x{methods.Length}");
         return true;
     }

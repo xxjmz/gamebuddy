@@ -115,6 +115,10 @@ await clickSpeech();
 assert.deepEqual(recorded(), [], 'A speech bubble without a contextual action must not open Personal Data.');
 
 calls.length = 0;
+const beforeNormal=elements['#speech-text'].textContent;
+handlers.guideState({ available: true, visible: false, kind:'normal', title:'小怪' });
+assert.equal(elements['#speech-text'].textContent,beforeNormal,'Cached normal guide must not replace the current speech.');
+assert.equal(elements['#encounter-guide'].classList.contains('visible'),false);
 handlers.guideState({ available: true, visible: false, title: '守卫' });
 let releaseGuide;
 windowControls.reopenEncounterGuide = () => {

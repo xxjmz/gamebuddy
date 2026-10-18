@@ -407,7 +407,7 @@ body.review-mode .app-shell { background: #f5bd19; }
 .review-character-stamp {
   position: absolute;
   z-index: 3;
-  right: 20px;
+  left: 20px;
   bottom: 18px;
   width: 78px;
   height: 78px;
@@ -425,6 +425,7 @@ body.review-mode .app-shell { background: #f5bd19; }
 
 .review-data-panel { padding-top: 2px; }
 .review-radar-card {
+  position: relative;
   min-height: 360px;
   margin: -13px 0 0;
   border-radius: 35% 4px 4px 4px;
@@ -439,6 +440,11 @@ body.review-mode .app-shell { background: #f5bd19; }
 .review-radar-label { fill: var(--review-blue); font: 900 11px "Microsoft YaHei", sans-serif; }
 .review-radar-value { fill: #a65b10; font: 900 15px Impact, sans-serif; }
 .review-radar-empty { position: absolute; inset: 0; display: grid; place-content: center; padding-top: 35px; color: #95611d; font: 800 12px "Microsoft YaHei", sans-serif; }
+.review-radar-scope { display: block; text-align: right; padding: 0 15px 12px; color: #95611d; font-size: 11px; font-weight: 700; }
+.review-abandoned-count { color: #ffe2a1; font-size: 12px; font-weight: 700; align-self: flex-end; padding-bottom: 6px; }
+.review-stat-count-row { grid-template-columns: 105px 1fr auto !important; }
+.review-streak-rule { height: 1px; background: rgba(23,73,134,.3); }
+.review-stat-count-row b small { font: 800 12px "Microsoft YaHei", sans-serif; }
 .review-stats { display: grid; gap: 7px; padding: 0 14px 8px; }
 .review-stat-row { display: grid; grid-template-columns: 105px 1fr 48px; align-items: center; gap: 10px; min-height: 25px; }
 .review-stat-copy { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
@@ -558,3 +564,23 @@ body.review-mode .app-shell { background: #f5bd19; }
   .review-run-card,
   .review-run-build { transition: none; }
 }
+/* 套路提示：只展示已确认关联，标题/作用、短板、建议三个层级。 */
+.build-guidance { --guidance-accent: #dfb778; display: grid; gap: 0; max-height: 390px; overflow-y: auto; overscroll-behavior: contain; margin-top: 10px; color: #e4ddd0; scrollbar-width: thin; scrollbar-color: #715238 transparent; }
+.build-guidance-system { padding: 15px 16px; min-width: 0; font-size: 13px; line-height: 1.7; }
+.build-guidance-system + .build-guidance-system { border-top: 1px solid #d8b07524; }
+.build-guidance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
+.build-guidance-heading strong { color: #f0d6aa; font-size: 15px; font-weight: 600; letter-spacing: .04em; line-height: 1.5; flex: 1 1 auto; min-width: 0; }
+.build-guidance-role { max-width: 57%; flex: 0 1 auto; padding: 3px 8px; border: 1px solid #d1a36738; border-radius: 5px; background: #c89a5620; color: #dcb67c; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.build-guidance-line { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.build-guidance-line .build-guidance-label { color: #9e9689; font-size: 11px; letter-spacing: .06em; }
+.build-guidance-system .build-guidance-line p { margin: 0; font-size: 13px; line-height: 1.7; color: #c9c3b7; overflow-wrap: anywhere; }
+.build-guidance-advice { margin-top: 9px; }
+.build-guidance-advice .build-guidance-label { color: #d8b47b; }
+.build-guidance-system .build-guidance-advice p { color: #ede3d0; }
+.build-guidance-system.conflict { background: linear-gradient(110deg, #a24e3420, transparent 85%); }
+.build-guidance-system.conflict .build-guidance-heading strong { color: #edbaa6; }
+.build-guidance-system.conflict .build-guidance-role { color: #e2a38f; border-color: #c7795f45; background: #ad5c3e22; }
+.draft-card { position: relative; }
+.draft-card .build-guidance { display: none; position: absolute; left: -1px; top: 54px; width: min(404px, calc(100vw - 64px)); max-height: min(390px, 65vh); box-sizing: border-box; z-index: 30; padding: 0; margin: 0; border: 1px solid #ad875456; border-top-color: #d9b27399; border-radius: 10px; background: linear-gradient(145deg, #262720, #191c1b 72%); box-shadow: 0 14px 38px #0008, inset 0 1px 0 #f5d9a411; }
+.draft-card:last-child .build-guidance { left: auto; right: -1px; }
+.draft-card:hover .build-guidance, .draft-card:focus-within .build-guidance { display: grid; }

@@ -334,17 +334,17 @@ function buildStats(runs) {
   const completed = wins + losses;
   const progressRuns = runs.filter(run => number(run.finalFloor) !== null);
   const progressTotal = progressRuns.reduce((total, run) => total + (run.result === 'win' ? 100 : clamp((run.finalFloor || 0) / 55) * 100), 0);
-  const deckRuns = runs.filter(run => number(run?.finalState?.deckSize) !== null);
-  const compactDecks = deckRuns.filter(run => run.finalState.deckSize <= 20).length;
   const eliteRuns = runs.filter(run => (run.counters?.eliteEntries || 0) > 0).length;
-  const smiths = sum(runs, 'smiths');
-  const restKnown = smiths + sum(runs, 'heals') + sum(runs, 'otherKnownRestActions');
+  let streak=0,maxStreak=0;
+  for(const run of [...runs].reverse()){
+    streak=run.result==='win'?streak+1:0;
+    maxStreak=Math.max(maxStreak,streak);
+  }
   return [
     { id: 'winRate', label: '通关率', ...ratio(wins, completed) },
     { id: 'progress', label: '平均进度', value: progressRuns.length ? Math.round(progressTotal / progressRuns.length) : null, numerator: progressRuns.length, denominator: progressRuns.length },
-    { id: 'compactDeck', label: '20张内牌组', ...ratio(compactDecks, deckRuns.length) },
     { id: 'eliteRun', label: '精英挑战', ...ratio(eliteRuns, runs.length) },
-    { id: 'campUpgrade', label: '火堆升级', ...ratio(smiths, restKnown, sum(runs, 'unknownRestActions')) }
+    { id: 'maxWinStreak', label: '最多连胜', kind: 'count', value: maxStreak, sampleSize:runs.length }
   ];
 }
 

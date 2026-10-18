@@ -63,6 +63,8 @@ assert.match(universalHtml,/全角色 · 最近 3 局/);assert.match(universalHt
 assert.equal((universalHtml.match(/review-radar-data/g)||[]).length,1);
 const abandonedHtml=window.GameBuddyReviewUi.render({...dashboard,window:{wins:1,losses:1,abandoned:1},recentRuns:[{result:'abandoned',character:'ironclad',runId:'quit'}]});
 assert.match(abandonedHtml,/review-result abandoned">放弃/);assert.match(abandonedHtml,/放弃 1 局/);assert.doesNotMatch(abandonedHtml,/review-result loss/);
+const countHtml=window.GameBuddyReviewUi.render({...dashboard,stats:[{id:'maxWinStreak',kind:'count',label:'最多连胜',value:3,sampleSize:50}]});
+assert.match(countHtml,/最多连胜/);assert.match(countHtml,/3<small> 连胜/);assert.doesNotMatch(countHtml,/3%|width:3%/);
 
 const hostileName = '打击<script>"&';
 const buildDashboard = {

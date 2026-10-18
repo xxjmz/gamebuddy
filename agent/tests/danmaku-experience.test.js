@@ -407,3 +407,19 @@ test('商店快照会更新未播提醒，已售出或离场不补播，新访�
   await adapter.ingestObservation(obs(5, input), { runId: 'r' });
   assert.equal(adapter.tick()[0].source, 'key_component');
 });
+
+test('辅助牌按流派排队并分开去重，同一流派合并，一牌多流派互不吞提醒',()=>{
+  let now=0;const adapter=new DanmakuBridgeAdapter({now:()=>now});
+  const live=state({combat:false,cards:[]});live.run.character='silent';live.run.room='Shop';live.player.gold=200;
+  const items=[{itemType:'card',id:'PIERCING_WAIL',price:24,stockKey:'card:0'}, {itemType:'card',id:'ABRASIVE',price:144,stockKey:'card:1'}];
+  const event={name:'shop.opened',data:{visitId:'group-1',gold:200,items}};
+  adapter.syncKeyComponents(event,live,'group-run');
+  assert.equal(adapter.director.queue.length,2);
+  const first=adapter.tick()[0];assert.match(first.text,/敏捷防线/);assert.match(first.text,/尖啸/);assert.match(first.text,/磨蚀/);
+  adapter.syncKeyComponents({...event,name:'shop.updated'},live,'group-run');
+  assert.equal(adapter.director.queue.length,1);assert.match(adapter.director.queue[0].text,/弃牌周转/);
+  now=500;const second=adapter.tick()[0];assert.match(second.text,/磨蚀/);
+  adapter.syncKeyComponents({...event,name:'shop.updated'},live,'group-run');assert.equal(adapter.director.queue.length,0);
+  adapter.syncKeyComponents({name:'shop.closed'},live,'group-run');
+  adapter.syncKeyComponents({...event,data:{...event.data,visitId:'group-2'}},live,'group-run');assert.equal(adapter.director.queue.length,2);
+});
