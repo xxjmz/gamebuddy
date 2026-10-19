@@ -1,5 +1,12 @@
 # Windows弹幕恢复验证（2026-10-19）
 
+## 2026-10-20 透明底框与0.2.10
+
+- 用户确认0.2.9可用，要求发送入口周围底框透明。原生发送窗口改为transparent:true、backgroundColor:#00000000、hasShadow:false；页面根背景透明。保留可聚焦、非穿透、owner和展开流程，按钮及输入卡片保留自身底色。
+- Mac Electron分别运行源码和0.2.10包内资源检查通过：根背景透明，截图留白像素alpha为0，控件边界、输入、mock提交、关闭与重开均通过；截图已查看。以上仍不是原生Windows运行结果。
+- 新包dist/danmaku-fix/GameBuddy-Setup-0.2.10.exe，SHA256为012089f0578daa35db45d7c91656433261b760d4ef0bdaf3584c30b849edb7f9；同目录SHA256SUMS-0.2.10.txt。包内main/preload/发送窗模块/CSS/渲染代码与冻结输入匹配，无根目录.env或.secrets。已在访达定位，旧版保留。
+- 获用户明确授权后，测试分支codex/windows-composer-native-20261020已推送。当前界面改动提交da7900e，原生Windows工作流https://github.com/xxjmz/gamebuddy/actions/runs/39285403685 已触发，截至本次记录仍queued、没有运行步骤，不记录为通过。任务6.3保持待完成；用户的0.2.9确认不代替新版Windows自动验收。
+
 ## 2026-10-20 原生Windows验收待执行
 
 - 用户明确要求原生Windows验证。新增`scripts/windows-composer-smoke.js`和`windows-native-input.ps1`：启动安装目录的实际EXE，通过本机回放触发生产场景和窗口显示；由Win32 SendInput点击/输入，调试协议仅观察状态与截图，发送接口为本机mock。

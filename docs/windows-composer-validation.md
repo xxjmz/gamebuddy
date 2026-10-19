@@ -1,6 +1,6 @@
 # Windows 发送弹幕点击验收
 
-当前 0.2.9 是候选修复包，尚未取得原生 Windows 的通过日志。Mac 运行源码、Mac 运行包内 ASAR、应用宝转译运行 EXE 都不能替代原生 Windows 验收。
+用户已确认 0.2.9 发送功能可用；0.2.10 将按钮和输入卡片周围的底框改为透明。新版原生 Windows 自动检查已触发，尚在排队，没有通过日志。Mac 运行源码、Mac 运行包内 ASAR、应用宝转译运行 EXE 都不能替代原生 Windows 验收。
 
 ## Automated check
 
