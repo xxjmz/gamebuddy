@@ -710,14 +710,13 @@ function showPetContextMenu(point) {
 }
 
 function showGatewaySetup() {
-  shell.openExternal(KEYS_PAGE_URL).catch(error => console.warn('GameBuddy key page failed:', error.message));
   if (gatewayWindow && !gatewayWindow.isDestroyed()) {
     gatewayWindow.focus();
     return;
   }
   gatewayWindow = new BrowserWindow({
     width: 440,
-    height: 390,
+    height: 440,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -1081,6 +1080,9 @@ ipcMain.handle('gateway-setup:save', (_event, payload) => {
   return { ok: true };
 });
 ipcMain.on('gateway-setup:cancel', () => gatewayWindow?.close());
+ipcMain.on('gateway-setup:open-keys', () => {
+  shell.openExternal(KEYS_PAGE_URL).catch(error => console.warn('GameBuddy key page failed:', error.message));
+});
 ipcMain.on('toggle-llm-thinking', () => {
   llmThinkingEnabled = !llmThinkingEnabled;
   applyLlmMode();

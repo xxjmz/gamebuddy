@@ -10,6 +10,7 @@ const { writeGatewayPreference, readGatewayPreference } = require('../agent/llm/
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'gamebuddy-gateway-ui-')));
 const file = path.join(app.getPath('userData'), 'llm-gateway.json');
 let cancelled = false;
+let openedKeys = false;
 ipcMain.handle('gateway-setup:load', () => ({
   apiKey: '',
   baseURL: 'https://copilot.tencent.com/v2/',
@@ -20,6 +21,7 @@ ipcMain.handle('gateway-setup:save', (_event, payload) => {
   return saved.ok ? { ok: true } : { ok: false, message: saved.message };
 });
 ipcMain.on('gateway-setup:cancel', () => { cancelled = true; });
+ipcMain.on('gateway-setup:open-keys', () => { openedKeys = true; });
 
 const timer = setTimeout(() => {
   console.error('Gateway setup renderer timed out');
@@ -30,7 +32,7 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({
     show: false,
     width: 440,
-    height: 390,
+    height: 440,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
@@ -43,6 +45,9 @@ app.whenReady().then(async () => {
   assert.match(text, /API Key/);
   assert.match(text, /网关/);
   assert.match(text, /公司个人 token 网关/);
+  assert.match(text, /公司内网 API 获取链接/);
+  await win.webContents.executeJavaScript('document.querySelector("#openKeys").click()');
+  assert.equal(openedKeys, true);
   assert.equal(await win.webContents.executeJavaScript('document.querySelector("#baseURL").value'), 'https://copilot.tencent.com/v2/');
   await win.webContents.executeJavaScript('document.querySelector("#form").requestSubmit()');
   await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');

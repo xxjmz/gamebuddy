@@ -5,11 +5,16 @@
 ## ADDED Requirements
 
 ### Requirement: Pet context menu opens the key page and a two-field dialog
-桌宠右键菜单 SHALL 提供「配置密钥」。选择后系统浏览器 MUST 打开 `https://tencent.sso.codebuddy.cn/profile/keys`，同时 MUST 出现配置框。第一行 MUST 接受 API Key。第二行 MUST 标明为网关，默认值为 `https://copilot.tencent.com/v2/`，并 MUST 用文字说明这是公司个人 token 网关。玩家 MUST 可以修改网关地址。取消或空白 API Key MUST NOT 写入配置。
+桌宠右键菜单 SHALL 提供「配置密钥」。选择后 MUST 只出现配置框，MUST NOT 自动打开系统浏览器。配置框 MUST 提供「公司内网 API 获取链接」；点击该链接后系统浏览器 MUST 打开 `https://tencent.sso.codebuddy.cn/profile/keys`。第一行 MUST 接受 API Key。第二行 MUST 标明为网关，默认值为 `https://copilot.tencent.com/v2/`，并 MUST 用文字说明这是公司个人 token 网关。玩家 MUST 可以修改网关地址。取消或空白 API Key MUST NOT 写入配置。
 
 #### Scenario: Configure key from the pet
 - **WHEN** 玩家在桌宠上右键并选择「配置密钥」
-- **THEN** 系统浏览器打开密钥页，并显示 API Key 和预填的公司个人 token 网关
+- **THEN** 显示 API Key、预填的公司个人 token 网关，以及「公司内网 API 获取链接」
+- **AND** 系统浏览器保持关闭
+
+#### Scenario: Key page opens from the dialog link
+- **WHEN** 玩家在配置框中点击「公司内网 API 获取链接」
+- **THEN** 系统浏览器打开 `https://tencent.sso.codebuddy.cn/profile/keys`
 
 #### Scenario: Cancel leaves configuration unchanged
 - **WHEN** 玩家打开对话框后取消，或提交空白 API Key

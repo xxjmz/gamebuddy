@@ -22,7 +22,8 @@ contextBridge.exposeInMainWorld('windowControls', {
 contextBridge.exposeInMainWorld('gatewaySetup', {
   load: () => ipcRenderer.invoke('gateway-setup:load'),
   save: payload => ipcRenderer.invoke('gateway-setup:save', payload),
-  cancel: () => ipcRenderer.send('gateway-setup:cancel')
+  cancel: () => ipcRenderer.send('gateway-setup:cancel'),
+  openKeysPage: () => ipcRenderer.send('gateway-setup:open-keys')
 });
 
 contextBridge.exposeInMainWorld('gamebuddyBridge', {
