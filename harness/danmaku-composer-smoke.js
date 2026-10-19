@@ -50,7 +50,10 @@ app.whenReady().then(async () => {
   });
   assert.equal(window.isFocusable(), true);
   assert.equal(window.getParentWindow(), owner);
-  assert.match(window.getBackgroundColor(), /121717$/i);
+  // macOS returns RGB here even for an alpha-zero background; pixels below verify alpha.
+  assert.match(window.getBackgroundColor(), /^#000000(?:00)?$/i);
+  assert.equal(await window.webContents.executeJavaScript(`getComputedStyle(document.documentElement).backgroundColor`), 'rgba(0, 0, 0, 0)');
+  assert.equal(await window.webContents.executeJavaScript(`getComputedStyle(document.body).backgroundColor`), 'rgba(0, 0, 0, 0)');
   if (interactive) {
     window.setTitle('GameBuddy 发送窗口验证');
     owner.showInactive();
@@ -67,7 +70,10 @@ app.whenReady().then(async () => {
   })`);
   for (const b of bounds) assert.ok(b.visible && b.left >= 0 && b.top >= 0 && b.right <= b.width && b.bottom <= b.height, JSON.stringify(b));
   const output = path.join(__dirname, '..', '.runtime', 'danmaku-composer'); fs.mkdirSync(output, { recursive: true });
-  fs.writeFileSync(path.join(output, 'expanded.png'), (await window.webContents.capturePage()).toPNG());
+  const expandedImage = await window.webContents.capturePage();
+  fs.writeFileSync(path.join(output, 'expanded.png'), expandedImage.toPNG());
+  const bitmap = expandedImage.toBitmap();
+  assert.equal(bitmap[3], 0, 'Window margin must have zero alpha');
   window.webContents.send('bridge-danmaku', { id: 'composer-no-flyer', source: 'ai', text: '不应绘制到按钮窗口' });
   await window.webContents.executeJavaScript('document.querySelector("#shared-composer-input").value="合成输入回归"; document.querySelector("#shared-composer-submit").click()');
   await waitFor('document.querySelector("#shared-composer-status").textContent.includes("已发送")');

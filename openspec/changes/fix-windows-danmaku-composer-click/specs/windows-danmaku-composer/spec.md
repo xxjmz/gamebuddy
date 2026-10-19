@@ -23,7 +23,11 @@ On Windows, the send-danmaku button and its input panel SHALL live in a window t
 - **THEN** the input, send and close controls SHALL remain inside that window's visible bounds and receive interaction
 
 ### Requirement: Ordinary interactive composer host
-Windows发送窗口 SHALL 从创建时保持不透明、可聚焦和非穿透，收起后 MUST 保持可点击。发送窗 SHALL 位于飞行层之上，其点击不依赖光标轮询。普通弹幕到来 MUST NOT 主动夺取输入焦点。
+Windows发送窗口 SHALL 从创建时保持可聚焦和非穿透，收起后 MUST 保持可点击。发送窗 SHALL 位于飞行层之上，其点击不依赖光标轮询。普通弹幕到来 MUST NOT 主动夺取输入焦点。按钮和输入卡片外的窗口背景 SHALL 透明，MUST NOT 显示实色矩形或原生窗口阴影。
+
+#### Scenario: Background around composer controls
+- **WHEN** 发送按钮显示，或输入卡片展开
+- **THEN** 按钮和输入卡片周围留白露出游戏画面，控件本身保持清晰可见、可点击和可输入
 
 #### Scenario: First click and reopen
 - **WHEN** 用户第一次点击发送按钮，或关闭输入框后再次点击

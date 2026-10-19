@@ -114,6 +114,8 @@ async function run() {
       if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
       return result.result.value;
     };
+    assert.equal(await observe(`getComputedStyle(document.documentElement).backgroundColor`), 'rgba(0, 0, 0, 0)');
+    assert.equal(await observe(`getComputedStyle(document.body).backgroundColor`), 'rgba(0, 0, 0, 0)');
     const input = (action, extra) => {
       execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
         '-File', path.join(__dirname, 'windows-native-input.ps1'), '-Action', action,

@@ -8,8 +8,8 @@ function createComposerHost({ bounds, preload, page, parent }) {
     title: 'GameBuddy · 发弹幕',
     parent,
     frame: false,
-    transparent: false,
-    backgroundColor: '#121717',
+    transparent: true,
+    backgroundColor: '#00000000',
     focusable: true,
     acceptFirstMouse: true,
     resizable: false,
@@ -17,7 +17,7 @@ function createComposerHost({ bounds, preload, page, parent }) {
     skipTaskbar: true,
     alwaysOnTop: true,
     show: false,
-    hasShadow: true,
+    hasShadow: false,
     autoHideMenuBar: true,
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false }
   });
