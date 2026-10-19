@@ -1,6 +1,6 @@
 {
   "name": "gamebuddy",
-  "version": "0.1.1-rc.1",
+  "version": "0.2.10",
   "private": true,
   "description": "A real-time AI companion for Slay the Spire 2",
   "main": "main.js",
@@ -79,7 +79,8 @@
           ]
         }
       ],
-      "artifactName": "GameBuddy-Setup-${version}.${ext}"
+      "artifactName": "GameBuddy-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "include": "build/installer.nsh",
@@ -88,7 +89,17 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "GameBuddy"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "distribution/GameBuddyBridge",
+        "to": "bridge",
+        "filter": [
+          "gamebuddy_bridge.dll",
+          "GameBuddyBridge.json"
+        ]
+      }
+    ]
   },
   "allowScripts": {
     "electron@37.10.3": true,

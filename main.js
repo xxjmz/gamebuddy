@@ -1,4 +1,9 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, screen, dialog, shell } = require('electron');
+app.disableHardwareAcceleration();
+if (process.env.WINEPREFIX || process.env.WINELOADER) {
+  app.commandLine.appendSwitch('in-process-gpu');
+  app.commandLine.appendSwitch('disable-gpu-sandbox');
+}
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const WebSocket = require('ws');
@@ -38,6 +43,7 @@ const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
 const { createFactReviewService } = require('./review/fact-service');
 const { createLocalFactStore } = require('./facts/local-fact-store');
 const fs = require('node:fs');
+const { createComposerHost, showComposerHost, setComposerExpanded } = require('./src/danmaku-composer-window');
 
 const BRIDGE_URL = process.env.GAMEBUDDY_BRIDGE_URL || 'ws://127.0.0.1:27182';
 const BRIDGE_MODE = process.env.GAMEBUDDY_BRIDGE_MODE === 'replay' ? 'replay' : 'game';
@@ -45,6 +51,8 @@ let mainWindow;
 let reviewWindow;
 let petWindow;
 let danmakuWindow;
+let composerWindow;
+let composerExpanded = false;
 let tray;
 let bridgeSocket;
 let bridgeReconnectTimer;
@@ -53,6 +61,7 @@ let petHiddenByUser = false;
 let petTopmostTimer;
 let danmakuTimer;
 let danmakuHideTimer;
+let danmakuCursorProbe;
 let petDragState;
 let encounterGuideKey = '';
 let dismissedEncounterGuideKey = '';
@@ -116,11 +125,17 @@ function syncCardGuidance(state, readRewardSnapshot = true) {
 }
 const sharedDanmakuClient = new SharedDanmakuClient();
 let danmakuLlm = null;
-function createDanmakuLlm(client = makeLlmClient({
-  thinking: 'disabled',
-  temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
-  maxTokens: 300
-}, { timeoutMs: 60_000, onLog: publishLlmLog })) {
+function danmakuLlmOverrides() {
+  return {
+    thinking: 'disabled',
+    wireApi: 'chat',
+    reasoningEffort: '',
+    temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
+    maxTokens: 800
+  };
+}
+
+function createDanmakuLlm(client = makeLlmClient(danmakuLlmOverrides(), { timeoutMs: 60_000, onLog: publishLlmLog })) {
   if (!client) return null;
   return new DanmakuLlmAtmosphere({
     llm: client,
@@ -160,11 +175,7 @@ function logLlmMode() {
 
 function rebindLlmClients() {
   cardGuidanceService.llm = makeLlmClient({ thinking: 'disabled', temperature: 0.1, maxTokens: 3000 }, { timeoutMs: 60_000, onLog: publishLlmLog });
-  const danmakuClient = makeLlmClient({
-    thinking: 'disabled',
-    temperature: Number.isFinite(baseLlmConfig.temperature) ? baseLlmConfig.temperature : 0.9,
-    maxTokens: 300
-  }, { timeoutMs: 60_000, onLog: publishLlmLog });
+  const danmakuClient = makeLlmClient(danmakuLlmOverrides(), { timeoutMs: 60_000, onLog: publishLlmLog });
   if (danmakuClient && !danmakuLlm) {
     danmakuLlm = createDanmakuLlm(danmakuClient);
     danmakuAdapter.llmAtmosphere = danmakuLlm;
@@ -443,6 +454,13 @@ function clearDanmaku() {
     danmakuWindow.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
     danmakuWindow.hide();
   }
+  composerExpanded = false;
+  if (composerWindow && !composerWindow.isDestroyed()) {
+    composerWindow.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
+    layoutComposerWindow(false);
+    composerWindow.blur();
+    composerWindow.hide();
+  }
 }
 
 function hideDanmakuAfter() {
@@ -462,6 +480,7 @@ function flushDanmaku() {
   if (!messages.length || !danmakuWindow || danmakuWindow.isDestroyed()) return;
   clearTimeout(danmakuHideTimer);
   danmakuWindow.showInactive();
+  showComposerWindow();
   const character = observationStore.getState()?.run?.character
     || danmakuAdapter.previous?.run?.character
     || null;
@@ -773,6 +792,11 @@ function hidePet() {
   trackPageOut('pet');
 }
 
+function quitApp() {
+  isQuitting = true;
+  app.quit();
+}
+
 function showPetContextMenu(point) {
   if (!petWindow || petWindow.isDestroyed()) return;
   const skinItems = petSkins.map(skin => ({
@@ -802,7 +826,7 @@ function showPetContextMenu(point) {
       ]
     },
     { type: 'separator' },
-    { label: '关闭桌面宠物', click: hidePet }
+    { label: '退出 GameBuddy', click: quitApp }
   ]);
   menu.popup({
     window: petWindow,
@@ -823,6 +847,8 @@ function showGatewaySetup() {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
+    show: false,
+    backgroundColor: '#171a1c',
     title: '配置密钥',
     autoHideMenuBar: true,
     webPreferences: {
@@ -831,6 +857,7 @@ function showGatewaySetup() {
       nodeIntegration: false
     }
   });
+  gatewayWindow.once('ready-to-show', () => gatewayWindow.show());
   gatewayWindow.loadFile(path.join(__dirname, 'src', 'gateway-setup.html'));
   gatewayWindow.on('closed', () => { gatewayWindow = undefined; });
 }
@@ -1007,6 +1034,7 @@ function createReviewWindow() {
     minWidth: 1120,
     minHeight: 720,
     backgroundColor: '#f5bd19',
+    show: false,
     title: 'GameBuddy · 个人数据',
     frame: false,
     autoHideMenuBar: true,
@@ -1017,6 +1045,7 @@ function createReviewWindow() {
       nodeIntegration: false
     }
   });
+  reviewWindow.once('ready-to-show', () => reviewWindow.show());
 
   reviewWindow.loadFile(path.join(__dirname, 'src', 'review.html'));
   reviewWindow.webContents.on('did-finish-load', publishReviewChanged);
@@ -1084,6 +1113,37 @@ function createPetWindow() {
 function syncDanmakuWindowBounds() {
   if (!danmakuWindow || danmakuWindow.isDestroyed()) return;
   danmakuWindow.setBounds(screen.getPrimaryDisplay().bounds);
+  if (composerWindow && !composerWindow.isDestroyed() && composerWindow.isVisible()) layoutComposerWindow(composerExpanded);
+}
+
+function composerHostBounds(expanded) {
+  const anchor = danmakuWindow && !danmakuWindow.isDestroyed()
+    ? danmakuWindow.getBounds()
+    : screen.getPrimaryDisplay().bounds;
+  const area = screen.getDisplayMatching(anchor).bounds;
+  const width = expanded ? 520 : 128;
+  const height = expanded ? 280 : 72;
+  return {
+    x: Math.round(area.x + area.width - width - 18),
+    y: Math.round(area.y + (area.height - height) / 2),
+    width,
+    height
+  };
+}
+
+function layoutComposerWindow(expanded) {
+  if (!composerWindow || composerWindow.isDestroyed()) return;
+  composerWindow.setBounds(composerHostBounds(expanded));
+}
+
+function raiseComposerWindow() {
+  showComposerHost(composerWindow);
+}
+
+function showComposerWindow() {
+  if (!composerWindow || composerWindow.isDestroyed()) return;
+  if (!composerWindow.isVisible()) layoutComposerWindow(composerExpanded);
+  raiseComposerWindow();
 }
 
 function createDanmakuWindow() {
@@ -1110,11 +1170,49 @@ function createDanmakuWindow() {
   danmakuWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   danmakuWindow.setIgnoreMouseEvents(true, { forward: true });
   danmakuWindow.webContents.setBackgroundThrottling(false);
-  danmakuWindow.loadFile(path.join(__dirname, 'src', 'danmaku.html'));
+  danmakuWindow.loadFile(path.join(__dirname, 'src', 'danmaku.html'), process.platform === 'win32'
+    ? { query: { surface: 'overlay' } }
+    : undefined);
+  if (process.platform === 'win32') createComposerWindow();
   danmakuWindow.webContents.on('did-finish-load', () => {
     danmakuWindow?.webContents.send('bridge-danmaku-clear', danmakuAdapter.director.snapshot());
   });
   danmakuWindow.on('closed', () => { danmakuWindow = undefined; });
+  startDanmakuCursorProbe();
+}
+
+function createComposerWindow() {
+  if (composerWindow) return;
+  composerWindow = createComposerHost({
+    bounds: composerHostBounds(false),
+    parent: danmakuWindow,
+    preload: path.join(__dirname, 'preload.js'),
+    page: path.join(__dirname, 'src', 'danmaku.html')
+  });
+  composerWindow.on('closed', () => { composerWindow = undefined; });
+}
+
+function startDanmakuCursorProbe() {
+  // Windows 全屏游戏不会把移动事件转发给未聚焦的透明窗口，改由主进程采样光标。
+  if (process.platform !== 'win32' || danmakuCursorProbe) return;
+  danmakuCursorProbe = setInterval(() => {
+    const overlay = danmakuWindow;
+    if (!overlay || overlay.isDestroyed() || !overlay.isVisible() || overlay.webContents.isLoading()) return;
+    const point = screen.getCursorScreenPoint();
+    const bounds = overlay.getBounds();
+    const composer = composerWindow;
+    const composerBounds = composer && !composer.isDestroyed() && composer.isVisible() ? composer.getBounds() : null;
+    const overComposer = composerBounds && point.x >= composerBounds.x && point.x < composerBounds.x + composerBounds.width
+      && point.y >= composerBounds.y && point.y < composerBounds.y + composerBounds.height;
+    if (overComposer) {
+      overlay.setIgnoreMouseEvents(true, { forward: true });
+      return;
+    }
+    overlay.webContents.send('danmaku-cursor-probe', {
+      x: point.x - bounds.x,
+      y: point.y - bounds.y
+    });
+  }, 40);
 }
 
 function createTray() {
@@ -1128,7 +1226,7 @@ function createTray() {
       else { petHiddenByUser = false; keepPetVisible(); }
     } },
     { type: 'separator' },
-    { label: '退出', click: () => { isQuitting = true; app.quit(); } }
+    { label: '退出', click: quitApp }
   ]));
   tray.on('click', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -1166,20 +1264,28 @@ ipcMain.on('toggle-pet', () => {
   else { petHiddenByUser = false; keepPetVisible(); }
 });
 ipcMain.on('pet-pass-through', (_event, enabled) => petWindow?.setIgnoreMouseEvents(Boolean(enabled), { forward: true }));
-ipcMain.on('danmaku-pointer-mode', (_event, interactive) => {
-  if (!danmakuWindow || danmakuWindow.isDestroyed()) return;
-  // 只有鼠标落在弹幕或详情卡片上时才接管输入；其它区域始终穿透给游戏。
+ipcMain.on('danmaku-pointer-mode', (event, interactive) => {
+  if (!danmakuWindow || danmakuWindow.isDestroyed() || event.sender !== danmakuWindow.webContents) return;
+  // 只有鼠标落在飞行弹幕上时才接管输入；发送按钮在独立窗口里，不走穿透。
   danmakuWindow.setIgnoreMouseEvents(!interactive, { forward: true });
 });
-ipcMain.on('danmaku-composer-focus', (_event, enabled) => {
-  if (!danmakuWindow || danmakuWindow.isDestroyed()) return;
+ipcMain.on('danmaku-composer-focus', (event, enabled) => {
+  const host = composerWindow && event.sender === composerWindow.webContents
+    ? composerWindow
+    : danmakuWindow;
+  if (!host || host.isDestroyed()) return;
   const focusable = Boolean(enabled);
+  if (host === composerWindow) {
+    composerExpanded = focusable;
+    setComposerExpanded(host, focusable, composerHostBounds(focusable));
+    return;
+  }
   // 弹幕层默认不可聚焦，避免抢走游戏键盘；打开输入栏时临时放开。
-  danmakuWindow.setFocusable(focusable);
+  host.setFocusable(focusable);
   if (focusable) {
-    danmakuWindow.showInactive();
-    danmakuWindow.focus();
-    danmakuWindow.webContents.focus();
+    host.showInactive();
+    host.focus();
+    host.webContents.focus();
   }
 });
 ipcMain.on('pet-context-menu', (_event, point) => showPetContextMenu(point));
@@ -1315,6 +1421,7 @@ app.on('before-quit', () => {
   clearInterval(bridgeHealthTimer);
   clearInterval(petTopmostTimer);
   clearInterval(danmakuTimer);
+  clearInterval(danmakuCursorProbe);
   bridgeSocket?.close();
 });
 app.on('window-all-closed', () => {

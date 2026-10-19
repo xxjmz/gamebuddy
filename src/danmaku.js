@@ -9,6 +9,12 @@ const composerInput = document.querySelector('#shared-composer-input');
 const composerSubmit = document.querySelector('#shared-composer-submit');
 const composerScene = document.querySelector('#shared-composer-scene');
 const composerStatus = document.querySelector('#shared-composer-status');
+const surface = new URLSearchParams(location.search).get('surface') || 'all';
+if (surface === 'overlay') composer?.remove();
+if (surface === 'composer') {
+  layer?.remove();
+  document.documentElement.classList.add('composer-surface');
+}
 const flyers = [];
 const displayedMessageIds = new Set();
 const SPEED = 105;
@@ -275,12 +281,24 @@ composerInput?.addEventListener('keydown', event => {
 
 // 窗口默认完全鼠标穿透。Electron 的 forward 模式仍会把移动事件交给页面，
 // 因此只在弹幕、右侧按钮或编辑器附近临时接管输入。
-document.addEventListener('mousemove', event => {
-  const element = event.target instanceof Element ? event.target : null;
-  const target = element?.closest('.danmaku-item');
-  const composing = element?.closest('.shared-composer');
+function syncPointerTarget(element) {
+  const target = element?.closest?.('.danmaku-item') || null;
+  const composing = Boolean(element?.closest?.('.shared-composer'));
+  if (target) pauseAll(target);
+  else if (held) resumeAll();
   if (composerOpen || target || composing) setPointerInteractive(true);
   else if (!held) setPointerInteractive(false);
+}
+
+document.addEventListener('mousemove', event => {
+  syncPointerTarget(event.target instanceof Element ? event.target : null);
+});
+
+window.gamebuddyBridge?.onDanmakuCursorProbe?.(point => {
+  const x = Number(point?.x);
+  const y = Number(point?.y);
+  const element = Number.isFinite(x) && Number.isFinite(y) ? document.elementFromPoint(x, y) : null;
+  syncPointerTarget(element);
 });
 
 window.gamebuddyBridge?.onDanmaku(showDanmaku);
