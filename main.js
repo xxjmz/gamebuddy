@@ -5,7 +5,17 @@ const WebSocket = require('ws');
 const { createObservationStore } = require('./harness/observation-store');
 const { createOrchestrator } = require('./agent/orchestrator');
 const { createOpenAiClient, readLlmConfig, redactSecrets } = require('./agent/llm/openai');
-const { reportAppStart } = require('./agent/telemetry/datong');
+const {
+  hasDeviceId,
+  reportAppOut,
+  reportAppStart,
+  reportBridgeConnectResult,
+  reportFirstOpen,
+  reportLlmReview,
+  reportPageIn,
+  reportPageOut,
+  reportSuggestionImpression
+} = require('./agent/telemetry/datong');
 const {
   KEYS_PAGE_URL,
   COMPANY_GATEWAY_NAME,
@@ -162,10 +172,10 @@ function rebindLlmClients() {
     danmakuLlm.llm = danmakuClient;
   }
   if (orchestrator) {
-    orchestrator.setLlm(makeLlmClient(
+    orchestrator.setLlm(watchDecisionLlm(makeLlmClient(
       { thinking: llmThinkingEnabled ? 'enabled' : 'disabled' },
       { onThinkingChange: updateAgentThinking, onLog: publishLlmLog }
-    ));
+    )));
   }
 }
 
@@ -177,11 +187,21 @@ function applyLlmMode() {
 
 function buildOrchestrator() {
   orchestrator = createOrchestrator({
-    llm: makeLlmClient(
+    llm: watchDecisionLlm(makeLlmClient(
       { thinking: llmThinkingEnabled ? 'enabled' : 'disabled' },
       { onThinkingChange: updateAgentThinking, onLog: publishLlmLog }
-    ),
-    onRecommendation: publishRecommendation,
+    )),
+    onRecommendation: recommendation => {
+      const review = consumeLlmReview();
+      if (review) {
+        void reportLlmReview({
+          userDataDir: telemetryDir(),
+          featureName: review.featureName,
+          result: review.result
+        });
+      }
+      publishRecommendation(recommendation);
+    },
     onAgentStatus: status => broadcast('agent-status', status)
   });
 }
@@ -325,7 +345,72 @@ function considerObservation(observation, options) {
 }
 let bridgeHealthTimer;
 let lastBridgeStatus = { status: 'waiting', detail: '等待本地 Mod Bridge', url: BRIDGE_URL, mode: BRIDGE_MODE };
+let bridgeResultReported = false;
+let appStartedAt = Date.now();
+const pageOpenedAt = {};
+let pendingLlmReview = null;
 let agentRunId = null;
+
+const DECISION_LLM_METHODS = {
+  completeRoute: 'map_route',
+  completeCardReward: 'card_reward',
+  completeRest: 'rest_site',
+  completeEvent: 'event_choice',
+  completeShop: 'shop_choice'
+};
+
+function telemetryDir() {
+  try {
+    return app.getPath('userData');
+  } catch {
+    return undefined;
+  }
+}
+
+function trackPageIn(pageId) {
+  if (pageOpenedAt[pageId]) return;
+  pageOpenedAt[pageId] = Date.now();
+  void reportPageIn({ userDataDir: telemetryDir(), pageId });
+}
+
+function trackPageOut(pageId) {
+  const openedAt = pageOpenedAt[pageId];
+  if (!openedAt) return;
+  delete pageOpenedAt[pageId];
+  void reportPageOut({ userDataDir: telemetryDir(), pageId, stayDuration: Date.now() - openedAt });
+}
+
+function reportBridgeOnce(result) {
+  if (bridgeResultReported) return;
+  bridgeResultReported = true;
+  void reportBridgeConnectResult({ userDataDir: telemetryDir(), result });
+}
+
+function watchDecisionLlm(client) {
+  if (!client) return client;
+  const wrapped = { ...client };
+  for (const [method, featureName] of Object.entries(DECISION_LLM_METHODS)) {
+    if (typeof client[method] !== 'function') continue;
+    wrapped[method] = async (...args) => {
+      try {
+        const result = await client[method](...args);
+        pendingLlmReview = { featureName, result: 'success' };
+        return result;
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        pendingLlmReview = { featureName, result: 'fallback' };
+        throw error;
+      }
+    };
+  }
+  return wrapped;
+}
+
+function consumeLlmReview() {
+  const review = pendingLlmReview;
+  pendingLlmReview = null;
+  return review;
+}
 
 function currentObservation(now = Date.now()) {
   const observation = observationStore.getObservation(now);
@@ -393,6 +478,7 @@ async function ingestCombatDanmaku(observation) {
 
 function broadcastBridgeStatus(status, detail = '') {
   lastBridgeStatus = { status, detail, url: BRIDGE_URL, mode: BRIDGE_MODE };
+  if (status === 'live') reportBridgeOnce('success');
   broadcast('bridge-status', lastBridgeStatus);
 }
 
@@ -457,6 +543,14 @@ function clearAgentThinking(task) {
 }
 
 function publishRecommendation(recommendation) {
+  if (['card_reward', 'rest_site', 'event_choice', 'map_route', 'shop_choice'].includes(recommendation?.task)) {
+    void reportSuggestionImpression({
+      userDataDir: telemetryDir(),
+      elementId: 'suggestion_card',
+      featureName: recommendation.task,
+      source: recommendation.source
+    });
+  }
   broadcast('bridge-recommendation', recommendation);
   if (recommendation?.task === 'card_reward' || recommendation?.task === 'rest_site' || recommendation?.task === 'event_choice' || recommendation?.task === 'map_route' || recommendation?.task === 'shop_choice') {
     activeCardRecommendation = recommendation;
@@ -475,6 +569,7 @@ function keepPetVisible() {
   if (petHiddenByUser || !petWindow || petWindow.isDestroyed()) return;
   petWindow.setAlwaysOnTop(true, 'screen-saver');
   petWindow.showInactive();
+  trackPageIn('pet');
 }
 
 function resizePetWindow(mode = 'compact') {
@@ -663,12 +758,19 @@ async function considerEncounterGuide(state) {
   syncPetWindowSize();
   keepPetVisible();
   petWindow?.webContents.send('bridge-encounter-guide', guide);
+  void reportSuggestionImpression({
+    userDataDir: telemetryDir(),
+    elementId: 'encounter_guide',
+    featureName: 'encounter_guide',
+    source: 'rules'
+  });
   publishEncounterGuideState();
 }
 
 function hidePet() {
   petHiddenByUser = true;
   petWindow?.hide();
+  trackPageOut('pet');
 }
 
 function showPetContextMenu(point) {
@@ -872,6 +974,7 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
   mainWindow.webContents.on('did-finish-load', () => {
+    trackPageIn('main_panel');
     mainWindow.webContents.send('bridge-status', lastBridgeStatus);
     const observation = currentObservation();
     const state = observation.state;
@@ -886,6 +989,7 @@ function createMainWindow() {
     if (!isQuitting) {
       event.preventDefault();
       mainWindow.hide();
+      trackPageOut('main_panel');
     }
   });
 }
@@ -956,6 +1060,7 @@ function createPetWindow() {
   petWindow.setAlwaysOnTop(true, 'screen-saver');
   petWindow.loadFile(path.join(__dirname, 'src', 'pet.html'));
   petWindow.webContents.on('did-finish-load', () => {
+    trackPageIn('pet');
     petWindow.webContents.send('bridge-status', lastBridgeStatus);
     publishPetSkin();
     const observation = currentObservation();
@@ -1025,7 +1130,16 @@ function createTray() {
     { type: 'separator' },
     { label: '退出', click: () => { isQuitting = true; app.quit(); } }
   ]));
-  tray.on('click', () => mainWindow?.isVisible() ? mainWindow.hide() : mainWindow?.show());
+  tray.on('click', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+      trackPageOut('main_panel');
+    } else {
+      mainWindow.show();
+      trackPageIn('main_panel');
+    }
+  });
 }
 
 ipcMain.on('window-minimize', event => {
@@ -1035,7 +1149,11 @@ ipcMain.on('window-minimize', event => {
 ipcMain.on('window-close', event => {
   const window = BrowserWindow.fromWebContents(event.sender);
   if (window === reviewWindow) window.destroy();
-  else window?.hide();
+  else {
+    window?.hide();
+    if (window === petWindow) trackPageOut('pet');
+    if (window === mainWindow) trackPageOut('main_panel');
+  }
 });
 
 ipcMain.on('open-main-window', () => {
@@ -1155,7 +1273,13 @@ ipcMain.handle('refresh-recommendation', async () => {
 });
 
 app.whenReady().then(() => {
-  void reportAppStart({ userDataDir: app.getPath('userData') });
+  appStartedAt = Date.now();
+  const userDataDir = app.getPath('userData');
+  const firstOpen = !hasDeviceId(userDataDir);
+  void reportAppStart({ userDataDir }).then(() => {
+    if (firstOpen) return reportFirstOpen({ userDataDir });
+    return null;
+  });
   rebuildFactReviews();
   readPetPreferences();
   applyCharacterSkin(observationStore.getState()?.run?.character);
@@ -1178,7 +1302,21 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('before-quit', () => { isQuitting = true; reviewService.flush(); factStore.flush(); clearTimeout(bridgeReconnectTimer); clearTimeout(danmakuHideTimer); clearInterval(bridgeHealthTimer); clearInterval(petTopmostTimer); clearInterval(danmakuTimer); bridgeSocket?.close(); });
+app.on('before-quit', () => {
+  isQuitting = true;
+  trackPageOut('pet');
+  trackPageOut('main_panel');
+  if (!bridgeResultReported) reportBridgeOnce('fail');
+  void reportAppOut({ userDataDir: telemetryDir(), stayDuration: Math.max(0, Date.now() - appStartedAt) });
+  reviewService.flush();
+  factStore.flush();
+  clearTimeout(bridgeReconnectTimer);
+  clearTimeout(danmakuHideTimer);
+  clearInterval(bridgeHealthTimer);
+  clearInterval(petTopmostTimer);
+  clearInterval(danmakuTimer);
+  bridgeSocket?.close();
+});
 app.on('window-all-closed', () => {
   if (isQuitting && process.platform !== 'darwin') app.quit();
 });
