@@ -185,6 +185,14 @@ function applyLlmMode() {
   logLlmMode();
 }
 
+const DECISION_LLM_METHODS = {
+  completeRoute: 'map_route',
+  completeCardReward: 'card_reward',
+  completeRest: 'rest_site',
+  completeEvent: 'event_choice',
+  completeShop: 'shop_choice'
+};
+
 function buildOrchestrator() {
   orchestrator = createOrchestrator({
     llm: watchDecisionLlm(makeLlmClient(
@@ -350,14 +358,6 @@ let appStartedAt = Date.now();
 const pageOpenedAt = {};
 let pendingLlmReview = null;
 let agentRunId = null;
-
-const DECISION_LLM_METHODS = {
-  completeRoute: 'map_route',
-  completeCardReward: 'card_reward',
-  completeRest: 'rest_site',
-  completeEvent: 'event_choice',
-  completeShop: 'shop_choice'
-};
 
 function telemetryDir() {
   try {

@@ -70,6 +70,7 @@
       "output": "dist"
     },
     "win": {
+      "signExecutable": false,
       "target": [
         {
           "target": "nsis",
@@ -81,6 +82,7 @@
       "artifactName": "GameBuddy-Setup-${version}.${ext}"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
