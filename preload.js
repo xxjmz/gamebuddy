@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('gamebuddyBridge', {
   acknowledgeDanmakuPresented: id => ipcRenderer.send('danmaku-presented', id),
   getDanmakuStats: () => ipcRenderer.invoke('get-danmaku-stats'),
   setDanmakuPointerMode: interactive => ipcRenderer.send('danmaku-pointer-mode', Boolean(interactive)),
+  onDanmakuCursorProbe: callback => ipcRenderer.on('danmaku-cursor-probe', (_event, point) => callback(point)),
   setDanmakuComposerFocus: enabled => ipcRenderer.send('danmaku-composer-focus', Boolean(enabled)),
   clearLlmLog: () => ipcRenderer.send('clear-llm-log'),
   getObservation: () => ipcRenderer.invoke('get-observation'),

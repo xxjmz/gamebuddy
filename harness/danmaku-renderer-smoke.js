@@ -176,6 +176,38 @@ app.whenReady().then(async () => {
   assert.equal(supportTexts.length,2);assert.ok(supportTexts.some(t=>/敏捷防线/.test(t)&&/尖啸/.test(t)&&/磨蚀/.test(t)));
   assert.ok(supportTexts.some(t=>/弃牌周转/.test(t)&&/磨蚀/.test(t)));
   console.log('Support cards grouped by system rendered without cross-system suppression.');
+  // 原生穿透切换可能产生 pointerleave，不能推翻主进程同一位置的采样结果。
+  const pointerModes = [];
+  ipcMain.on('danmaku-pointer-mode', (event, mode) => {
+    if (event.sender === window.webContents) pointerModes.push(mode);
+  });
+  await window.loadFile(path.join(__dirname, '..', 'src', 'danmaku.html'), { query: { surface: 'overlay' } });
+  window.webContents.send('bridge-danmaku', { id: 'stable-hover', source: 'ai', character: 'defect', text: '稳定悬停回归' });
+  await waitForCount(1);
+  const point = await window.webContents.executeJavaScript(`(() => {
+    const item = document.querySelector('.danmaku-item'); item.style.left = '300px';
+    const r = item.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2};
+  })()`);
+  window.webContents.send('danmaku-cursor-probe', point);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  const pausedTransform = await window.webContents.executeJavaScript("document.querySelector('.danmaku-item').style.transform");
+  for (let i = 0; i < 10; i++) {
+    await window.webContents.executeJavaScript(`(() => {
+      const item=document.querySelector('.danmaku-item');
+      item.dispatchEvent(new PointerEvent('pointerleave'));
+      document.dispatchEvent(new MouseEvent('mousemove',{bubbles:true}));
+      if(!item.classList.contains('hovered')) throw new Error('Native events undid sampled hover');
+    })()`);
+    window.webContents.send('danmaku-cursor-probe', point);
+  }
+  assert.equal(await window.webContents.executeJavaScript("document.querySelector('.danmaku-item').style.transform"), pausedTransform);
+  assert.deepEqual(pointerModes, [true], 'stationary hover must not oscillate native input mode');
+  window.webContents.send('danmaku-cursor-probe', {x:-1,y:-1});
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(await window.webContents.executeJavaScript("document.querySelector('.danmaku-item').classList.contains('hovered')"), false);
+  assert.notEqual(await window.webContents.executeJavaScript("document.querySelector('.danmaku-item').style.transform"), pausedTransform);
+  assert.deepEqual(pointerModes, [true, false]);
+  console.log('Sampled hover remains stable through native leave events and resumes outside.');
   clearTimeout(timeout);
   window.destroy();
   app.exit(0);

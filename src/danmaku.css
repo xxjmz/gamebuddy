@@ -78,6 +78,30 @@ body { font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; poi
   bottom: calc(100% + 12px);
 }
 
+html.composer-surface,
+html.composer-surface body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+html.composer-surface .shared-composer {
+  position: absolute;
+  inset: 0;
+  transform: none;
+  justify-content: flex-end;
+}
+html.composer-surface .shared-composer__toggle {
+  width: 112px;
+  height: 48px;
+}
+html.composer-surface .shared-composer__panel {
+  right: 124px;
+  width: calc(100% - 136px);
+  max-width: 360px;
+  box-sizing: border-box;
+}
+
 .shared-composer {
   position: fixed;
   z-index: 20000;

@@ -24,6 +24,17 @@ function jsonResponse(content) {
   return { ok: true, json: async () => ({ choices: [{ message: { content } }] }) };
 }
 
+function streamResponse(content) {
+  const encoder = new TextEncoder();
+  const text = [...content].map(piece => `data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`).join('') + 'data: [DONE]\n\n';
+  const bytes = encoder.encode(text);
+  return { ok: true, body: new ReadableStream({ start(controller) {
+    // 同时覆盖UTF-8中文字符、JSON事件和换行跨网络分片。
+    for (let i = 0; i < bytes.length; i += 11) controller.enqueue(bytes.slice(i, i + 11));
+    controller.close();
+  } }) };
+}
+
 test('blank api key does not write a preference', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gamebuddy-gateway-'));
   const file = path.join(dir, 'llm-gateway.json');
@@ -33,7 +44,7 @@ test('blank api key does not write a preference', () => {
   assert.equal(readGatewayPreference(file), null);
 });
 
-test('company gateway uses chat completions and X-Api-Key', async () => {
+test('company gateway uses its supported model, streaming chat completions and X-Api-Key', async () => {
   const beforeKey = process.env.GAMEBUDDY_LLM_API_KEY;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gamebuddy-gateway-'));
   const file = path.join(dir, 'llm-gateway.json');
@@ -45,8 +56,8 @@ test('company gateway uses chat completions and X-Api-Key', async () => {
   const requests = [];
   const client = createOpenAiClient(config, {
     fetchImpl: async (url, options) => {
-      requests.push({ url, headers: options.headers });
-      return jsonResponse('{"index":0,"reason":"公司网关"}');
+      requests.push({ url, headers: options.headers, body: JSON.parse(options.body) });
+      return streamResponse('{"index":0,"reason":"公司网关"}');
     }
   });
   const result = await client.completeRoute({ candidates: [{ index: 0 }] });
@@ -54,6 +65,32 @@ test('company gateway uses chat completions and X-Api-Key', async () => {
   assert.equal(requests[0].url, 'https://copilot.tencent.com/v2/chat/completions');
   assert.equal(requests[0].headers['X-Api-Key'], 'company-key');
   assert.equal(requests[0].headers.Authorization, undefined);
+  assert.equal(requests[0].body.stream, true);
+  assert.equal(requests[0].body.model, 'deepseek-v4.1-flash');
+  assert.equal(result.reason, '公司网关');
+});
+
+test('company streaming output reaches personality parsing as two phrases', async () => {
+  const { DanmakuLlmAtmosphere } = require('../danmaku/llm-atmosphere');
+  const phrases = ['伤口会记住，嘴就不必了。', '这塔的台阶，倒是一层比一层客气。'];
+  const config = buildPreferredConfig({ ...base, model: 'deepseek-flash', stream: false }, { apiKey: 'company-key', baseURL: DEFAULT_GATEWAY_URL });
+  const client = createOpenAiClient(config, { fetchImpl: async (_url, options) => {
+    const body = JSON.parse(options.body);
+    assert.equal(body.stream, true); assert.equal(body.model, 'deepseek-v4.1-flash');
+    return streamResponse(JSON.stringify({ phrases }));
+  } });
+  const result = await new DanmakuLlmAtmosphere({ llm: client }).generate({ character: 'ironclad', trigger: 'periodic', batchId: 'gateway-stream' });
+  assert.equal(result.status, 'generated');
+  assert.deepEqual(result.phrases, phrases);
+});
+
+test('custom gateways preserve their model and stream preference without mutating the base config', () => {
+  for (const stream of [false, true, undefined]) {
+    const original = { ...base, stream };
+    const config = buildPreferredConfig(original, { apiKey: 'other-key', baseURL: 'https://example.test/v1' });
+    assert.equal(config.model, base.model); assert.equal(config.stream, stream);
+    assert.deepEqual(original, { ...base, stream });
+  }
 });
 
 test('a replaced gateway keeps the original wire api and bearer auth', async () => {

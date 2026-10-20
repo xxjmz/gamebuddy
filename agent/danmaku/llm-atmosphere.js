@@ -95,6 +95,10 @@ class DanmakuLlmAtmosphere {
           recentTexts: [...(context.recentTexts || []), ...constraints.recentTopics.map(item => item.text)].slice(-20)
         }, { signal });
         if (signal?.aborted) return { status: 'cancelled', phrases: [] };
+        if (!Array.isArray(result?.phrases)) {
+          this.onLog({ event: 'failed', trigger: context.trigger, reason: 'invalid_response', count: 0 });
+          return { status: 'failed', reason: 'invalid_response', phrases: [] };
+        }
         const phrases = Array.isArray(result?.phrases) ? result.phrases : [];
         const enemies = context.snapshot?.enemies || [];
         const allowedKeys = new Set(enemies.map(enemy => enemy.key));
@@ -103,18 +107,23 @@ class DanmakuLlmAtmosphere {
           const structured = value && typeof value === 'object';
           const text = cleanPhrase(structured ? value.text : value);
           if (!text) return null;
-          const momentId = structured ? value.momentId || null : context.moments?.[0]?.id || null;
-          if (momentId && !moments.has(momentId)) return null;
+          const rawMomentId = structured ? value.momentId || null : null;
+          if (rawMomentId && !moments.has(rawMomentId)) return null;
+          const momentId = rawMomentId;
           const named = enemies.filter(enemy => text.includes(enemy.name)).map(enemy => enemy.key);
-          const enemyKeys = structured && Array.isArray(value.enemyKeys) ? value.enemyKeys : named.length ? named : momentId ? [] : [...allowedKeys];
-          if (enemyKeys.some(key => !allowedKeys.has(key))) return null;
+          const providedKeys = structured && Array.isArray(value.enemyKeys) ? value.enemyKeys : named;
+          const enemyKeys = providedKeys.map(key => {
+            if (allowedKeys.has(key)) return key;
+            const matches = enemies.filter(enemy => enemy.id === key || enemy.name === key);
+            return matches.length === 1 ? matches[0].key : null;
+          });
+          if (enemyKeys.some(key => !key)) return null;
           const topic = structured && Object.hasOwn(TOPICS, value.topic) ? value.topic : null;
           const motif = structured && typeof value.motif === 'string' ? value.motif.slice(0, 32) : '';
           const targetsEnemy = named.length > 0 || structured && Array.isArray(value.enemyKeys) && value.enemyKeys.length > 0;
           return { text, momentId, enemyKeys: [...new Set([...enemyKeys, ...named])], topic, motif, targetsEnemy };
         }).filter(Boolean);
-        const excluded = [...(context.recentTexts || []), ...this.recentTexts.keys(),
-          ...profile.examples, ...Object.values(profile.scenarioExamples || {}).flat()];
+        const excluded = [...(context.recentTexts || []), ...this.recentTexts.keys()];
         const selected = [];
         for (const item of valid) {
           const key = textKey(item.text);
@@ -129,8 +138,11 @@ class DanmakuLlmAtmosphere {
         for (const text of items) this.recentTexts.set(textKey(text), this.now() + this.ttlMs);
         while (this.cache.size > 512) this.cache.delete(this.cache.keys().next().value);
         while (this.recentTexts.size > 512) this.recentTexts.delete(this.recentTexts.keys().next().value);
-        this.onLog({ event: 'success', trigger: context.trigger, count: items.length });
-        return { status: items.length ? 'generated' : valid.length || Array.isArray(result?.phrases) && !phrases.length ? 'duplicate' : 'failed', phrases: items, commentaryByText: Object.fromEntries(selected.map(({ text, targetsEnemy, ...meta }) => [text, meta])) };
+        const status = items.length ? 'generated' : valid.length || !phrases.length ? 'duplicate' : 'failed';
+        this.onLog({ event: items.length ? 'success' : status === 'failed' ? 'failed' : 'filtered', trigger: context.trigger,
+          reason: items.length ? undefined : valid.length ? 'recent_duplicate_or_cooldown' : phrases.length ? 'invalid_phrases' : 'model_silent',
+          count: items.length, received: phrases.length, valid: valid.length });
+        return { status, phrases: items, commentaryByText: Object.fromEntries(selected.map(({ text, targetsEnemy, ...meta }) => [text, meta])) };
       } catch (error) {
         if (signal?.aborted) return { status: 'cancelled', phrases: [] };
         this.onLog({ event: 'fallback', trigger: context.trigger, reason: error.message });

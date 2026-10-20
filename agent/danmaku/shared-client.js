@@ -1,6 +1,10 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { loadProjectEnv } = require('../llm/load-env');
+
+// 安装包不带仓库 `.env`；默认指向线上共享弹幕服务，仍可用环境变量覆盖。
+const DEFAULT_SHARED_DANMAKU_URL = 'https://gamebuddy-shared-danmaku-pages.pages.dev';
 
 function cleanText(value, max = 80) {
   return String(value || '')
@@ -16,9 +20,15 @@ function withTimeout(ms) {
   return { signal: controller.signal, clear: () => clearTimeout(timer) };
 }
 
+function resolveSharedDanmakuUrl(baseUrl) {
+  if (baseUrl !== undefined) return String(baseUrl || '').trim();
+  loadProjectEnv();
+  return String(process.env.GAMEBUDDY_SHARED_DANMAKU_URL || DEFAULT_SHARED_DANMAKU_URL).trim();
+}
+
 class SharedDanmakuClient {
-  constructor({ baseUrl = process.env.GAMEBUDDY_SHARED_DANMAKU_URL, timeoutMs = 4000, clientId } = {}) {
-    this.baseUrl = String(baseUrl || '').trim().replace(/\/+$/, '');
+  constructor({ baseUrl, timeoutMs = 4000, clientId } = {}) {
+    this.baseUrl = resolveSharedDanmakuUrl(baseUrl).replace(/\/+$/, '');
     this.timeoutMs = Math.max(1000, Math.min(15_000, Number(timeoutMs) || 4000));
     this.clientId = clientId || crypto.randomUUID();
   }
@@ -82,4 +92,4 @@ class SharedDanmakuClient {
   }
 }
 
-module.exports = { SharedDanmakuClient, cleanText };
+module.exports = { SharedDanmakuClient, cleanText, DEFAULT_SHARED_DANMAKU_URL };

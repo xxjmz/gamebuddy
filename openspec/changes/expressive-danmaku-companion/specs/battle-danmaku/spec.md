@@ -76,6 +76,14 @@
 ### Requirement: Character specific voice mechanics
 五角色 SHALL 具有各自的用词、节奏、幽默逻辑和性格反差配置并进入实际请求，MUST 不靠重复关键词区分人格。
 
+#### Scenario: Distinct machine and necrobinder speech
+- **WHEN** 同一可选素材分别提供给机器人和亡灵契约师
+- **THEN** 机器人使用字面推理与自主意愿的错位，契约师使用家常照料与诡异的反差；实际系统提示包含当前角色的声音摘要，专属事件反应不被通用描述覆盖。
+
+#### Scenario: Contrast examples remain writing guidance
+- **WHEN** 提供同素材的中性表达与人格改写示例
+- **THEN** 示例只用于指导表达，照抄或明显近似改写仍被过滤，话题自由且不要求固定术语或每场覆盖状态事件。
+
 #### Scenario: Same optional subject
 - **WHEN** 相同素材分别提供给五角色
 - **THEN** 请求包含五种不同的表达规则与例子，仍不强制某个话题出现

@@ -38,9 +38,12 @@
 ### Requirement: Company gateway and custom gateway use different request shapes
 主机为 `copilot.tencent.com` 的已保存网关 MUST 把请求发到该根地址下的 `/chat/completions`，并用 `X-Api-Key` 携带密钥。玩家改成其他网关时，请求 MUST 使用该网关根地址，并沿用原来的接口类型和 `Authorization: Bearer`。原来的客户端本身 MUST 继续使用 Bearer。
 
+公司优先通道 MUST 使用 `deepseek-v4.1-flash` 与 `stream: true`，通过SSE解析建议和人格弹幕。其他网关及原客户端 MUST 保持各自模型ID及流式设置。
+
 #### Scenario: Default company gateway
 - **WHEN** 本地配置使用 `https://copilot.tencent.com/v2/` 和一份密钥，并产生一次优先请求
 - **THEN** 请求发往 `https://copilot.tencent.com/v2/chat/completions`，请求头包含 `X-Api-Key`
+- **AND** 模型为 `deepseek-v4.1-flash`，请求开启流式响应，分片内容合并后进入原有JSON解析和弹幕生成流程
 
 #### Scenario: Replaced gateway keeps bearer authentication
 - **WHEN** 玩家把网关改成另一个地址并产生一次优先请求
@@ -56,3 +59,17 @@
 #### Scenario: Cancel does not start the original request
 - **WHEN** 优先请求因当前场景取消而中止
 - **THEN** 不再调用原来的客户端
+
+### Requirement: Key configuration opens in foreground
+配置密钥窗口 SHALL 置顶显示。每次用户主动打开配置入口时，系统 SHALL 显示、抬升并聚焦唯一的配置窗口；首次加载完成后同样激活，窗口隐藏时重新显示，销毁后可新建。系统 MUST NOT 使用周期性抢焦点来维持置顶。
+
+#### Scenario: Reopen configuration
+- **WHEN** 配置窗口已存在或被隐藏，用户再次选择配置密钥
+- **THEN** 原窗口 SHALL 恢复显示并在前台聚焦，不新建重复窗口
+
+### Requirement: Configuration has no Windows native menu bar
+Windows配置窗口 SHALL 移除原生菜单栏，Alt键或粘贴时不得唤出File/Edit白条。系统 MUST 保留输入框编辑功能及Mac系统应用菜单，不通过拦截复制粘贴来隐藏菜单。
+
+#### Scenario: Paste into key field
+- **WHEN** 玩家在配置窗口粘贴密钥
+- **THEN** 输入框保持可编辑，窗口内 SHALL 不出现File/Edit菜单栏

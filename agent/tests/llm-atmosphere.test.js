@@ -306,8 +306,106 @@ test('五角色实际请求携带独立声音规则，含节奏用词笑点与�
 });
 
 
-test('写作例子只能帮助语感，模型照抄或近似套用时不作为固定弹幕播出', async () => {
+test('写作示例不再是黑名单，首次生成可以播放', async () => {
   const model = new DanmakuLlmAtmosphere({ llm: { enabled: true, completeDanmaku: async () => ({ phrases: ['手没抖，够了。', '这名字倒像个不肯解释的家伙。'] }) } });
   const result = await model.generate({ character: 'ironclad' });
-  assert.deepEqual(result.phrases, ['这名字倒像个不肯解释的家伙。']);
+  assert.deepEqual(result.phrases, ['手没抖，够了。', '这名字倒像个不肯解释的家伙。']);
+});
+
+test('机器人与骨头人别名通过真实请求链路保留专属反应及系统声音摘要', async t => {
+  const { createOpenAiClient } = require('../llm/openai');
+  const { personalityFor } = require('../danmaku/language-profile');
+  t.mock.method(console, 'log', () => {});
+  const requests = [];
+  for (const [character, wireApi] of [['机器人', 'chat'], ['骨头人', 'responses']]) {
+    const client = createOpenAiClient({ enabled: true, apiKey: 'test-only', model: 'test', baseURL: 'https://mock.invalid', wireApi }, {
+      fetchImpl: async (_url, options) => {
+        requests.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ choices: [{ message: { content: '{"phrases":[]}' } }] }) };
+      }
+    });
+    await new DanmakuLlmAtmosphere({ llm: client }).generate({ character, runId: 'synthetic' });
+  }
+  const robotSystem = requests[0].messages[0].content;
+  const necroSystem = requests[1].instructions;
+  const robot = JSON.parse(requests[0].messages[1].content);
+  const necro = JSON.parse(requests[1].input);
+  assert.equal(robot.character, 'defect'); assert.equal(necro.character, 'necrobinder');
+  assert.match(robotSystem.slice(robotSystem.indexOf('本次唯一说话者')), /机械思维与意愿/);
+  assert.match(necroSystem.slice(necroSystem.indexOf('本次唯一说话者')), /家常逻辑面对诡异/);
+  assert.doesNotMatch(robotSystem.slice(robotSystem.indexOf('本次唯一说话者')), /亡灵契约师/);
+  assert.doesNotMatch(necroSystem.slice(necroSystem.indexOf('本次唯一说话者')), /故障机器人/);
+  assert.match(robot.reactions.attack_played, /机械式/);
+  assert.match(necro.reactions.attack_played, /家务/);
+  assert.match(robot.reactions.player_hurt, /个人不满/);
+  assert.match(necro.reactions.player_hurt, /衣物/);
+  assert.deepEqual(robot.voice.contrasts, personalityFor('defect').voice.contrasts);
+  assert.deepEqual(necro.voice.contrasts, personalityFor('necrobinder').voice.contrasts);
+  assert.equal(robot.topicPolicy, necro.topicPolicy);
+  assert.match(robot.topicPolicy, /不是每场\/每批必说/);
+});
+
+test('人格改写对照也只作参考，未出现过时不因示例身份被过滤', async () => {
+  const { personalityFor } = require('../danmaku/language-profile');
+  for (const character of ['defect', 'necrobinder']) {
+    const example = personalityFor(character).voice.contrasts[0];
+    const model = new DanmakuLlmAtmosphere({ llm: { enabled: true, completeDanmaku: async () => ({
+      phrases: [example.inVoice, example.neutral, '这里的台阶倒是不懂什么叫客气。']
+    }) } });
+    assert.deepEqual((await model.generate({ character })).phrases, [example.inVoice, example.neutral]);
+  }
+});
+
+test('机器人示例加词改写仍可播出，只有几乎照抄样句才过滤', async () => {
+  const model = new DanmakuLlmAtmosphere({ llm: { enabled: true, completeDanmaku: async () => ({
+    phrases: ['动作已经结束了。想再挥一次，不是动作的一部分。']
+  }) } });
+  assert.deepEqual((await model.generate({ character: 'defect' })).phrases, ['动作已经结束了。想再挥一次，不是动作的一部分。']);
+});
+
+test('不因机器人归类或契约师待客用词拦截不同台词，真正重复仍过滤', async () => {
+  for (const [character, rows] of [
+    ['defect', ['这种心情不便归档，我想单独留着。', '归类的时候，我偏偏不想把它放进去。']],
+    ['necrobinder', ['给奇怪的念头留个位置，免得它无处可去。', '这份沉默也值得留一张凳子吧。']]
+  ]) {
+    let now = 0, call = 0;
+    const model = new DanmakuLlmAtmosphere({ now: () => now, llm: { enabled: true, completeDanmaku: async () => ({
+      phrases: [{ text: rows[call++], topic: 'other', motif: `改标-${call}` }]
+    }) } });
+    assert.equal((await model.generate({ character, runId: 'r', batchId: 'one' })).phrases.length, 1);
+    now = 15000;
+    assert.equal((await model.generate({ character, runId: 'r', batchId: 'two' })).phrases.length, 1);
+    now = 90001; call = 1;
+    assert.equal((await model.generate({ character, runId: 'r', batchId: 'three' })).phrases.length, 0);
+  }
+});
+
+test('五人格统一只因真实历史拒绝同一句，配置中的例子本身不触发黑名单', async () => {
+  const { personalityFor } = require('../danmaku/language-profile');
+  for (const character of ['ironclad', 'silent', 'defect', 'regent', 'necrobinder']) {
+    let now = 0;
+    const text = personalityFor(character).examples[0];
+    const model = new DanmakuLlmAtmosphere({ now: () => now, llm: { enabled: true, completeDanmaku: async () => ({ phrases: [text] }) } });
+    assert.deepEqual((await model.generate({ character, batchId: 'first' })).phrases, [text]);
+    now = 4000;
+    assert.deepEqual((await model.generate({ character, batchId: 'second' })).phrases, []);
+  }
+});
+
+test('已知唯一怪物名称或ID可还原实例key，未知目标或时刻仍不误作有效句子', async () => {
+  const model = new DanmakuLlmAtmosphere({ llm: { enabled: true, completeDanmaku: async () => ({ phrases: [
+    { text: '这场交锋里，倒不缺脾气。', enemyKeys: ['NIBBIT'] },
+    { text: '这个目标并不存在，不能保留。', enemyKeys: ['UNKNOWN'] },
+    { text: '这个时刻并不存在，不能保留。', momentId: 'unknown-moment' }
+  ] }) } });
+  const result = await model.generate({ character: 'defect', snapshot: { enemies: [{ id: 'NIBBIT', key: 'NIBBIT#0', name: '小啃兽' }] } });
+  assert.deepEqual(result.phrases, ['这场交锋里，倒不缺脾气。']);
+  assert.deepEqual(result.commentaryByText[result.phrases[0]].enemyKeys, ['NIBBIT#0']);
+});
+
+test('模型无效响应明确记录失败，不再把零条输出记成成功', async () => {
+  const logs = [];
+  const model = new DanmakuLlmAtmosphere({ onLog: entry => logs.push(entry), llm: { enabled: true, completeDanmaku: async () => null } });
+  assert.equal((await model.generate({ character: 'defect' })).reason, 'invalid_response');
+  assert.equal(logs[0].event, 'failed');
 });

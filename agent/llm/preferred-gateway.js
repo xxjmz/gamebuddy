@@ -3,6 +3,7 @@ const path = require('node:path');
 const { normalizeApiRoot, redactSecrets } = require('./openai');
 
 const DEFAULT_GATEWAY_URL = 'https://copilot.tencent.com/v2';
+const DEFAULT_COMPANY_MODEL = 'deepseek-v4.1-flash';
 const KEYS_PAGE_URL = 'https://tencent.sso.codebuddy.cn/profile/keys';
 const COMPANY_GATEWAY_NAME = '公司个人 token 网关';
 const LLM_METHODS = [
@@ -59,6 +60,8 @@ function buildPreferredConfig(baseConfig, preference) {
     enabled: true,
     apiKey: String(preference?.apiKey || '').trim(),
     baseURL,
+    model: company ? DEFAULT_COMPANY_MODEL : baseConfig?.model,
+    stream: company ? true : baseConfig?.stream,
     wireApi: company ? 'chat' : (baseConfig?.wireApi || 'responses'),
     authScheme: company ? 'x-api-key' : 'bearer',
     source: 'preferred-gateway'
@@ -102,6 +105,7 @@ function preferenceFile(userDataDir) {
 
 module.exports = {
   DEFAULT_GATEWAY_URL,
+  DEFAULT_COMPANY_MODEL,
   KEYS_PAGE_URL,
   COMPANY_GATEWAY_NAME,
   normalizeGateway,
