@@ -44,7 +44,7 @@ app.whenReady().then(async()=>{
  assert.equal(leaderboardFilters.method,undefined);
  win.show();win.focus();await settle();
  let board=await win.webContents.executeJavaScript(`(()=>{document.querySelector('.leaderboard-row').click();const row=document.querySelector('.leaderboard-row');row.focus();const style=getComputedStyle(row);return {text:document.body.innerText,html:document.body.innerHTML,width:document.documentElement.scrollWidth,viewport:innerWidth,active:document.activeElement===row,outlineWidth:style.outlineWidth,outlineStyle:style.outlineStyle,outlineColor:style.outlineColor};})()`);
- assert.match(board.text,/通关榜/);assert.match(board.text,/烟测选手/);assert.match(board.text,/01:15/);assert.match(board.text,/有战斗内读档/);
+ assert.match(board.text,/排行榜/);assert.match(board.text,/烟测选手/);assert.match(board.text,/01:15/);assert.match(board.text,/有战斗内读档/);
  assert.match(board.text,/STRIKE/);assert.match(board.text,/BURNING_BLOOD/);assert.match(board.text,/FISH \/ INITIAL \/ AGREE/);
  assert.doesNotMatch(board.text,/player-smoke-secret/);assert.doesNotMatch(board.html,/player-smoke-secret/);
  assert.ok(board.width<=board.viewport);assert.equal(board.active,true);assert.equal(board.outlineStyle,'solid');assert.notEqual(board.outlineWidth,'0px');assert.match(board.outlineColor,/32,\s*191,\s*208/);

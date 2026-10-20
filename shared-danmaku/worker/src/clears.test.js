@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import worker from './index.js';
 
-function createDb() {
+function createDb({ enabled = 1 } = {}) {
   const clears = [];
   return {
     prepare(sql) {
       const text = sql.replace(/\s+/g, ' ').trim();
       return {
+        async first() {
+          if (text.includes('leaderboard_config')) return { enabled };
+          throw new Error(text);
+        },
         bind(...params) {
           return {
             async run() {
@@ -32,6 +36,7 @@ function createDb() {
               return { meta: { changes: 1 } };
             },
             async first() {
+              if (text.includes('leaderboard_config')) return { enabled };
               if (!text.includes('WHERE run_id = ?1')) throw new Error(text);
               return clears.find(row => row.run_id === params[0]) || null;
             },
@@ -131,6 +136,16 @@ test('clears insert, ignore duplicates, and rank by duration', async () => {
   assert.equal(missing.status, 400);
   const invalid = await post(env, { runId: 'x', seed: 'nope' });
   assert.equal(invalid.status, 400);
+});
+
+test('leaderboard stays empty until the config switch is on', async () => {
+  const env = { DB: createDb(), CLEARS_DB: createDb({ enabled: 0 }), now: () => 1 };
+  assert.equal((await post(env, record('run-hidden', 10))).status, 201);
+  const hidden = await worker.fetch(new Request(
+    'https://board.test/v1/leaderboard?character=IRONCLAD&ascension=10&gameMode=Standard'
+  ), env);
+  assert.equal(hidden.status, 200);
+  assert.deepEqual(await hidden.json(), { enabled: false, items: [] });
 });
 
 test('danmaku routes stay on their existing responses', async () => {

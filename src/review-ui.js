@@ -168,7 +168,7 @@
             </form>
             <div class="review-actions">
               <span>仅保存在本机</span>
-              <button type="button" id="review-open-leaderboard">通关榜</button>
+              <button type="button" id="review-open-leaderboard">排行榜</button>
               <button type="button" id="review-export">导出</button>
               <button type="button" id="review-clear">清空</button>
             </div>
@@ -212,6 +212,14 @@
     return hours > 0 ? `${String(hours).padStart(2, '0')}:${clock}` : clock;
   }
 
+  function formatStartedAt(value) {
+    if (!Number.isInteger(value) || value < 0) return '未知';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '未知';
+    const pad = part => String(part).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
   function leaderboardName(value) {
     const name = String(value ?? '').trim();
     return name || '匿名人士';
@@ -250,6 +258,7 @@
   function leaderboardDetail(item, panelId) {
     return `
       <div class="leaderboard-detail" id="${panelId}" role="region" aria-label="通关详情">
+        ${leaderboardSection('开始时间', `<p class="leaderboard-empty">${formatStartedAt(item?.startedAt)}</p>`)}
         ${leaderboardSection('终局牌组', leaderboardCards(item?.finalDeck))}
         ${leaderboardSection('终局遗物', leaderboardRelics(item?.finalRelics))}
         ${leaderboardSection('事件选择', leaderboardEvents(item?.selectedEvents))}
@@ -302,11 +311,11 @@
     const status = state.status || 'idle';
     let results = '';
     if (status === 'loading') {
-      results = '<p class="leaderboard-status" role="status">正在读取通关榜…</p>';
+      results = '<p class="leaderboard-status" role="status">正在读取排行榜…</p>';
     } else if (status === 'error') {
-      results = '<div class="leaderboard-status" role="alert"><p>通关榜读取失败</p><button type="button" id="leaderboard-retry">重试</button></div>';
+      results = '<div class="leaderboard-status" role="alert"><p>排行榜读取失败</p><button type="button" id="leaderboard-retry">重试</button></div>';
     } else if (status === 'empty') {
-      results = '<p class="leaderboard-status" role="status">当前条件下暂无通关记录</p>';
+      results = '<p class="leaderboard-status" role="status">当前条件下暂无排行记录</p>';
     } else if (status === 'success') {
       results = `
         <div class="leaderboard-columns" aria-hidden="true"><span>名次</span><span>榜上名称</span><span>观察用时</span><span>战斗内读档</span></div>
@@ -316,11 +325,11 @@
       ? `<p class="leaderboard-filter-error" role="alert">请修正筛选条件。${state.filterError === 'ascension' ? '进阶需为 0 到 10000 的整数。' : '请检查角色和模式。'}</p>`
       : '';
     return `
-      <section class="review-page leaderboard-page" aria-label="通关榜">
+      <section class="review-page leaderboard-page" aria-label="排行榜">
         <div class="review-pattern" aria-hidden="true"></div>
         <header class="leaderboard-header">
           <button type="button" id="review-back-personal">返回个人数据</button>
-          <h1 class="leaderboard-title">通关榜</h1>
+          <h1 class="leaderboard-title">排行榜</h1>
         </header>
         <form class="leaderboard-filters" id="leaderboard-form">
           <label>角色<select id="leaderboard-character" name="character">${leaderboardOptions(LEADERBOARD_CHARACTERS, filters.character)}</select></label>

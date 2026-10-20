@@ -182,7 +182,7 @@ const idFallback = window.GameBuddyReviewUi.render({
 assert.match(idFallback, /STRIKE_R/);
 assert.match(idFallback, /BURNING_BLOOD/);
 
-assert.match(html, /id="review-open-leaderboard">通关榜/);
+assert.match(html, /id="review-open-leaderboard">排行榜/);
 
 const leaderboardItems = [
   {
@@ -281,7 +281,7 @@ const loadingBoard = window.GameBuddyReviewUi.renderLeaderboard({
   items: leaderboardItems,
   filterError: ''
 });
-assert.match(loadingBoard, /正在读取通关榜…/);
+assert.match(loadingBoard, /正在读取排行榜…/);
 assert.match(loadingBoard, /id="leaderboard-submit" disabled/);
 assert.doesNotMatch(loadingBoard, /pid-hide-slow/);
 assert.match(loadingBoard, /id="leaderboard-character"/);
@@ -291,7 +291,7 @@ const emptyBoard = window.GameBuddyReviewUi.renderLeaderboard({
   status: 'empty',
   items: []
 });
-assert.match(emptyBoard, /当前条件下暂无通关记录/);
+assert.match(emptyBoard, /当前条件下暂无排行记录/);
 assert.match(emptyBoard, /<option value="Custom" selected>自定义<\/option>/);
 assert.match(emptyBoard, /故障机器人/);
 assert.match(emptyBoard, /死灵法师/);
@@ -301,7 +301,7 @@ const errorBoard = window.GameBuddyReviewUi.renderLeaderboard({
   status: 'error',
   filterError: 'ascension'
 });
-assert.match(errorBoard, /通关榜读取失败/);
+assert.match(errorBoard, /排行榜读取失败/);
 assert.match(errorBoard, /id="leaderboard-retry">重试/);
 assert.match(errorBoard, /请修正筛选条件。进阶需为 0 到 10000 的整数。/);
 assert.match(errorBoard, /value="&quot;&gt;&lt;script&gt;"/);

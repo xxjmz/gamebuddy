@@ -61,7 +61,8 @@ function createLeaderboardClient({ baseUrl, timeoutMs = 4000, fetchImpl, clientI
           if (!body || typeof body !== 'object' || Array.isArray(body) || !Array.isArray(body.items)) {
             return { ok: false, status: response.status, reason: 'invalid_response' };
           }
-          return { ok: true, items: body.items };
+          const enabled = body.enabled !== false;
+          return { ok: true, enabled, items: enabled ? body.items : [] };
         } catch {
           return { ok: false, status: response.status, reason: 'invalid_response' };
         }

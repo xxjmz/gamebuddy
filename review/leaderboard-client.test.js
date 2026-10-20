@@ -63,7 +63,7 @@ function jsonResponse(status, body) {
     }
   });
   const empty = await encodedClient.list({ character: 'a&b', ascension: 0, gameMode: 'Custom' });
-  assert.deepEqual(empty, { ok: true, items: [] });
+  assert.deepEqual(empty, { ok: true, enabled: true, items: [] });
   assert.match(encodedCalls[0].url, /character=a%26b/);
   assert.equal(new URL(encodedCalls[0].url).searchParams.get('character'), 'a&b');
   assert.equal(new URL(encodedCalls[0].url).searchParams.get('gameMode'), 'Custom');

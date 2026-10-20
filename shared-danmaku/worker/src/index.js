@@ -272,9 +272,15 @@ function leaderboardQuery(url) {
   return { character, ascension, gameMode };
 }
 
+async function leaderboardEnabled(env) {
+  const row = await env.CLEARS_DB.prepare('SELECT enabled FROM leaderboard_config WHERE id = 1').first();
+  return Number(row?.enabled) === 1;
+}
+
 async function listLeaderboard(request, env) {
   const query = leaderboardQuery(new URL(request.url));
   if (!query) return json({ error: 'character, ascension and gameMode are required' }, 400, request);
+  if (!await leaderboardEnabled(env)) return json({ enabled: false, items: [] }, 200, request);
   const result = await env.CLEARS_DB.prepare(`
     SELECT run_id, character, ascension, game_mode, started_at, observed_duration_seconds, combat_save_load,
            final_deck, final_relics, selected_events, display_name, player_id, created_at
@@ -283,7 +289,7 @@ async function listLeaderboard(request, env) {
     ORDER BY observed_duration_seconds ASC, created_at ASC, run_id ASC
   `).bind(query.character, query.ascension, query.gameMode).all();
   const items = (result.results || []).map(mapClear);
-  return json({ items }, 200, request);
+  return json({ enabled: true, items }, 200, request);
 }
 
 export default {

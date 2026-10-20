@@ -349,8 +349,8 @@ async function leaderboardInteractions() {
   assert.equal(calls.length, 1);
   assertQuery(calls[0].filters, { character: 'ironclad', ascension: 0, gameMode: 'Standard' });
   assert.deepEqual(calls[0].rest, []);
-  assert.match(boardRoot.innerHTML, /正在读取通关榜…/);
-  assert.match(boardRoot.innerHTML, /通关榜/);
+  assert.match(boardRoot.innerHTML, /正在读取排行榜…/);
+  assert.match(boardRoot.innerHTML, /排行榜/);
   assert.equal(boardRoot.querySelector('#leaderboard-submit').disabled, true);
   assert.equal(boardController.getExpandedRunId(), 'alpha');
   dispatch(boardRoot.querySelector('#leaderboard-form'), 'submit');
@@ -467,10 +467,10 @@ async function leaderboardInteractions() {
   await tick();
   assertQuery(thrown[1], { character: thrown[0].character, ascension: thrown[0].ascension, gameMode: thrown[0].gameMode });
   assertQuery(thrown[0], { character: 'ironclad', ascension: 0, gameMode: 'Standard' });
-  assert.match(throwRoot.innerHTML, /当前条件下暂无通关记录/);
+  assert.match(throwRoot.innerHTML, /当前条件下暂无排行记录/);
   dispatch(throwRoot.querySelector('#review-back-personal'), 'click');
   assert.match(throwRoot.innerHTML, /还没有本地对局记录/);
-  assert.doesNotMatch(throwRoot.innerHTML, /当前条件下暂无通关记录/);
+  assert.doesNotMatch(throwRoot.innerHTML, /当前条件下暂无排行记录/);
 }
 
 leaderboardInteractions().then(() => {

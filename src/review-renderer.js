@@ -115,9 +115,9 @@
         expandedLeaderboardRunId = null;
         return;
       }
-      leaderboardItems = result.items;
+      leaderboardItems = result.enabled === false ? [] : result.items;
       expandedLeaderboardRunId = null;
-      leaderboardStatus = result.items.length ? 'success' : 'empty';
+      leaderboardStatus = result.enabled === false ? 'closed' : (leaderboardItems.length ? 'success' : 'empty');
     }
 
     async function queryLeaderboard(filters) {
