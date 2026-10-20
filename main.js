@@ -42,6 +42,7 @@ const { SharedDanmakuClient } = require('./agent/danmaku/shared-client');
 const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
 const { createFactReviewService } = require('./review/fact-service');
 const { createClearUploadClient, submitClearedRun } = require('./review/clear-upload-client');
+const { loadPlayerProfile, saveDisplayName } = require('./review/player-profile');
 const { createLocalFactStore } = require('./facts/local-fact-store');
 const fs = require('node:fs');
 const { createComposerHost, showComposerHost, setComposerExpanded } = require('./src/danmaku-composer-window');
@@ -898,6 +899,7 @@ function connectBridge() {
             replay: BRIDGE_MODE === 'replay' || message.replay === true,
             facts: () => factStore.getEffectiveFacts(message.data.runId),
             coverage: () => factStore.getCoverage(message.data.runId),
+            identity: () => loadPlayerProfile(app.getPath('userData')),
             client: clearUploadClient
           }).then(result => {
             if (result && result.ok === false) console.warn('GameBuddy clear upload skipped:', result.reason || 'failed');
@@ -1354,6 +1356,14 @@ ipcMain.on('accept-decision', (_event, decision) => {
 ipcMain.on('clear-llm-log', () => clearLlmLog());
 ipcMain.handle('get-observation', () => currentObservation());
 ipcMain.handle('review:getDashboard', () => reviewService.getDashboard());
+ipcMain.handle('review:getPlayerProfile', () => {
+  const profile = loadPlayerProfile(app.getPath('userData'));
+  return { displayName: profile.displayName };
+});
+ipcMain.handle('review:savePlayerProfile', (_event, displayName) => {
+  const profile = saveDisplayName(app.getPath('userData'), displayName);
+  return { displayName: profile.displayName };
+});
 ipcMain.handle('review:export', async () => {
   const result = await dialog.showSaveDialog(reviewWindow, {
     title: '导出 GameBuddy 本地复盘',

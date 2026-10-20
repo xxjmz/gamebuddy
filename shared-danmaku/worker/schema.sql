@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS clears (
   final_deck TEXT NOT NULL,
   final_relics TEXT NOT NULL,
   selected_events TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT '匿名人士',
+  player_id TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL
 );
 

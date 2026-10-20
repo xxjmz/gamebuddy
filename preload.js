@@ -52,6 +52,8 @@ contextBridge.exposeInMainWorld('gamebuddyBridge', {
   clearLlmLog: () => ipcRenderer.send('clear-llm-log'),
   getObservation: () => ipcRenderer.invoke('get-observation'),
   getReviewDashboard: () => ipcRenderer.invoke('review:getDashboard'),
+  getPlayerProfile: () => ipcRenderer.invoke('review:getPlayerProfile'),
+  savePlayerProfile: displayName => ipcRenderer.invoke('review:savePlayerProfile', displayName),
   onReviewChanged: callback => ipcRenderer.on('review:changed', (_event, dashboard) => callback(dashboard)),
   exportReview: () => ipcRenderer.invoke('review:export'),
   requestReviewClear: () => ipcRenderer.invoke('review:requestClear'),

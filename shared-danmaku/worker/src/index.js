@@ -181,6 +181,8 @@ function parseClearBody(body) {
     return null;
   }
   if (typeof body?.combatSaveLoad !== 'boolean' || !finalDeck || !finalRelics || !selectedEvents) return null;
+  const displayName = String(body?.displayName || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || '匿名人士';
+  if (!validToken(body?.playerId, 64)) return null;
   return {
     runId: body.runId,
     character: body.character,
@@ -190,7 +192,9 @@ function parseClearBody(body) {
     combatSaveLoad: body.combatSaveLoad,
     finalDeck,
     finalRelics,
-    selectedEvents
+    selectedEvents,
+    displayName,
+    playerId: body.playerId
   };
 }
 
@@ -206,6 +210,8 @@ function mapClear(row) {
     finalDeck: JSON.parse(row.final_deck),
     finalRelics: JSON.parse(row.final_relics),
     selectedEvents: JSON.parse(row.selected_events),
+    displayName: row.display_name || '匿名人士',
+    playerId: row.player_id,
     createdAt: row.created_at
   };
 }
@@ -223,8 +229,8 @@ async function createClear(request, env) {
   const inserted = await env.DB.prepare(`
     INSERT OR IGNORE INTO clears
       (run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
-       final_deck, final_relics, selected_events, created_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+       final_deck, final_relics, selected_events, display_name, player_id, created_at)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
   `).bind(
     clear.runId,
     clear.character,
@@ -235,11 +241,13 @@ async function createClear(request, env) {
     JSON.stringify(clear.finalDeck),
     JSON.stringify(clear.finalRelics),
     JSON.stringify(clear.selectedEvents),
+    clear.displayName,
+    clear.playerId,
     createdAt
   ).run();
   const row = await env.DB.prepare(`
     SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
-           final_deck, final_relics, selected_events, created_at
+           final_deck, final_relics, selected_events, display_name, player_id, created_at
     FROM clears
     WHERE run_id = ?1
   `).bind(clear.runId).first();
@@ -265,7 +273,7 @@ async function listLeaderboard(request, env) {
   if (!query) return json({ error: 'character, ascension and gameMode are required' }, 400, request);
   const result = await env.DB.prepare(`
     SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
-           final_deck, final_relics, selected_events, created_at
+           final_deck, final_relics, selected_events, display_name, player_id, created_at
     FROM clears
     WHERE character = ?1 AND ascension = ?2 AND game_mode = ?3
     ORDER BY observed_duration_seconds ASC, created_at ASC, run_id ASC

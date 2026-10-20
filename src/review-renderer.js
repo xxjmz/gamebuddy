@@ -8,6 +8,7 @@
     const schedule = options.setTimeout || ((fn, delay) => globalScope.setTimeout(fn, delay));
     const cancel = options.clearTimeout || (id => globalScope.clearTimeout(id));
     let dashboard = null;
+    let profile = { displayName: '匿名人士' };
     let expandedRunId = null;
     let toastTimer;
 
@@ -40,7 +41,7 @@
 
     function render(renderOptions = {}) {
       retainExpanded();
-      root.innerHTML = ui?.render(dashboard, expandedRunId) || '';
+      root.innerHTML = ui?.render(dashboard, expandedRunId, profile) || '';
       bindActions();
       if (renderOptions.restoreFocus && expandedRunId) focusRun(expandedRunId);
     }
@@ -74,6 +75,15 @@
     }
 
     function bindActions() {
+      root.querySelector('#review-name-form')?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const input = root.querySelector('#review-display-name');
+        const typed = String(input?.value || '').trim().slice(0, 16) || '匿名人士';
+        const result = await bridge?.savePlayerProfile?.(typed);
+        profile = { displayName: result?.displayName || typed };
+        render();
+        showToast(`榜上名称已保存：${profile.displayName}`);
+      });
       root.querySelector('#review-export')?.addEventListener('click', async () => {
         const result = await bridge?.exportReview?.();
         showToast(result?.ok ? '个人数据已导出' : '已取消导出');
@@ -101,8 +111,13 @@
       render();
     }
 
+    function setProfile(nextProfile) {
+      profile = { displayName: nextProfile?.displayName || '匿名人士' };
+    }
+
     return {
       setDashboard,
+      setProfile,
       activateRun,
       getExpandedRunId: () => expandedRunId
     };
@@ -122,12 +137,18 @@
     confirm: message => globalScope.confirm(message)
   });
 
-  async function loadDashboard() {
+    async function loadDashboard() {
     let dashboard;
     try {
       dashboard = await globalScope.gamebuddyBridge?.getReviewDashboard?.();
     } catch {
       dashboard = { recoveryWarning: '个人数据暂时无法读取，请关闭窗口后重试。' };
+    }
+    try {
+      const saved = await globalScope.gamebuddyBridge?.getPlayerProfile?.();
+      if (saved?.displayName) controller.setProfile(saved);
+    } catch {
+      // 名称读取失败时保留默认匿名人士。
     }
     controller.setDashboard(dashboard);
   }

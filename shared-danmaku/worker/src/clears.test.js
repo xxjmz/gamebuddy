@@ -12,7 +12,7 @@ function createDb() {
           return {
             async run() {
               if (!text.includes('INSERT OR IGNORE INTO clears')) throw new Error(text);
-              const [runId, character, ascension, gameMode, duration, saveLoad, deck, relics, events, createdAt] = params;
+              const [runId, character, ascension, gameMode, duration, saveLoad, deck, relics, events, displayName, playerId, createdAt] = params;
               if (clears.some(row => row.run_id === runId)) return { meta: { changes: 0 } };
               clears.push({
                 run_id: runId,
@@ -24,6 +24,8 @@ function createDb() {
                 final_deck: deck,
                 final_relics: relics,
                 selected_events: events,
+                display_name: displayName,
+                player_id: playerId,
                 created_at: createdAt
               });
               return { meta: { changes: 1 } };
@@ -63,6 +65,8 @@ function record(runId, duration, createdAt) {
     finalDeck: [{ id: 'STRIKE', upgraded: true }],
     finalRelics: [{ id: 'BURNING_BLOOD' }],
     selectedEvents: [{ eventId: 'FISH', pageId: 'INITIAL', optionId: 'BANANA' }],
+    displayName: '阿达',
+    playerId: '11111111-1111-4111-8111-111111111111',
     createdAt
   };
 }
@@ -84,6 +88,11 @@ test('clears insert, ignore duplicates, and rank by duration', async () => {
   assert.equal(created.runId, 'run-b');
   assert.equal(created.createdAt, 1_000);
   assert.equal(created.combatSaveLoad, false);
+  assert.equal(created.displayName, '阿达');
+  assert.equal(created.playerId, '11111111-1111-4111-8111-111111111111');
+  const anonymous = await post(env, { ...record('run-anon', 12), character: 'SILENT', displayName: '   ' });
+  assert.equal(anonymous.status, 201);
+  assert.equal((await anonymous.json()).displayName, '匿名人士');
 
   time = 1_000;
   const duplicate = await post(env, { ...record('run-b', 1), character: 'SILENT', observedDurationSeconds: 1 });

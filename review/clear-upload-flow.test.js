@@ -62,6 +62,7 @@ function ended(facts) {
   })).ok, true);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].combatSaveLoad, false);
+  assert.equal(calls[0].displayName, '匿名人士');
   assert.equal(calls[1].combatSaveLoad, true);
   assert.equal(calls[0].runId, 'clear-run');
   assert.equal(calls[0].observedDurationSeconds, 4);

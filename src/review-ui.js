@@ -146,7 +146,8 @@
     }).join('');
   }
 
-  function render(dashboard, expandedRunId = null) {
+  function render(dashboard, expandedRunId = null, profile = null) {
+    const displayName = profile?.displayName || '匿名人士';
     const safe = dashboard || { window: {}, axes: [], stats: [], recentRuns: [] };
     const character = safe.mainCharacter || 'ironclad';
     return `
@@ -159,10 +160,17 @@
             ${safe.window?.abandoned ? `<span class="review-abandoned-count">放弃 ${safe.window.abandoned} 局</span>` : ''}
           </div>
           <div class="review-brand"><strong>GAMEBUDDY</strong><span>个人数据</span></div>
-          <div class="review-actions">
-            <span>仅保存在本机</span>
-            <button type="button" id="review-export">导出</button>
-            <button type="button" id="review-clear">清空</button>
+          <div class="review-identity">
+            <form class="review-name" id="review-name-form">
+              <label for="review-display-name">榜上名称</label>
+              <input id="review-display-name" name="displayName" maxlength="16" value="${escapeHtml(displayName)}" autocomplete="nickname">
+              <button type="submit">保存</button>
+            </form>
+            <div class="review-actions">
+              <span>仅保存在本机</span>
+              <button type="button" id="review-export">导出</button>
+              <button type="button" id="review-clear">清空</button>
+            </div>
           </div>
         </header>
 

@@ -11,6 +11,8 @@ const record = {
   finalDeck: [{ id: 'STRIKE', upgraded: true }],
   finalRelics: [{ id: 'BURNING_BLOOD' }],
   selectedEvents: [{ eventId: 'FISH', pageId: 'INITIAL', optionId: 'BANANA' }],
+  displayName: '阿达',
+  playerId: '11111111-1111-4111-8111-111111111111',
   seed: 'secret-seed',
   playerName: 'Ada',
   account: 'acct',
@@ -37,6 +39,8 @@ const record = {
   assert.equal(body.runId, 'run-clear');
   assert.equal(body.seed, undefined);
   assert.equal(body.playerName, undefined);
+  assert.equal(body.displayName, '阿达');
+  assert.equal(body.playerId, '11111111-1111-4111-8111-111111111111');
   assert.equal(body.account, undefined);
   assert.equal(body.hp, undefined);
   assert.equal(body.potions, undefined);

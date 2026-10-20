@@ -2,6 +2,7 @@
 
 const { SharedDanmakuClient } = require('../agent/danmaku/shared-client');
 const { summarize } = require('./fact-service');
+const { normalizeDisplayName } = require('./player-profile');
 
 const CLEAR_FIELDS = [
   'runId',
@@ -12,7 +13,9 @@ const CLEAR_FIELDS = [
   'combatSaveLoad',
   'finalDeck',
   'finalRelics',
-  'selectedEvents'
+  'selectedEvents',
+  'displayName',
+  'playerId'
 ];
 
 function withTimeout(ms) {
@@ -60,7 +63,7 @@ function uploadEvents(events) {
   return selected;
 }
 
-function clearRecordFromSummary(summary) {
+function clearRecordFromSummary(summary, identity = {}) {
   if (!summary || summary.result !== 'win') return null;
   const finalDeck = uploadDeck(summary.finalDeck);
   const finalRelics = uploadRelics(summary.finalRelics);
@@ -80,7 +83,9 @@ function clearRecordFromSummary(summary) {
     combatSaveLoad: summary.combatSaveLoad === true,
     finalDeck,
     finalRelics,
-    selectedEvents
+    selectedEvents,
+    displayName: normalizeDisplayName(identity.displayName),
+    playerId: typeof identity.playerId === 'string' ? identity.playerId : ''
   };
 }
 
@@ -121,13 +126,14 @@ function createClearUploadClient({ baseUrl, timeoutMs = 4000, fetchImpl, clientI
   };
 }
 
-function submitClearedRun({ fact, stored, replay = false, facts, coverage, client, summarizeRun = summarize } = {}) {
+function submitClearedRun({ fact, stored, replay = false, facts, coverage, client, identity, summarizeRun = summarize } = {}) {
   try {
     if (!stored?.durable || stored.duplicate || replay) return Promise.resolve(null);
     if (!fact || fact.eventType !== 'run.ended' || fact.payload?.cleared !== true) return Promise.resolve(null);
     const loadedFacts = typeof facts === 'function' ? facts() : facts;
     const loadedCoverage = typeof coverage === 'function' ? coverage() : coverage;
-    const record = clearRecordFromSummary(summarizeRun(fact.runId, loadedFacts || [], loadedCoverage || {}));
+    const profile = typeof identity === 'function' ? identity() : identity;
+    const record = clearRecordFromSummary(summarizeRun(fact.runId, loadedFacts || [], loadedCoverage || {}), profile || {});
     if (!record || !client || typeof client.submit !== 'function') return Promise.resolve(null);
     return Promise.resolve()
       .then(() => client.submit(record))
