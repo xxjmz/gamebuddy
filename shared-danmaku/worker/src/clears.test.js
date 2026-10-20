@@ -81,7 +81,7 @@ async function post(env, body) {
 
 test('clears insert, ignore duplicates, and rank by duration', async () => {
   let time = 1_000;
-  const env = { DB: createDb(), now: () => time };
+  const env = { DB: createDb(), CLEARS_DB: createDb(), now: () => time };
   const first = await post(env, record('run-b', 30));
   assert.equal(first.status, 201);
   const created = await first.json();
@@ -132,7 +132,7 @@ test('clears insert, ignore duplicates, and rank by duration', async () => {
 });
 
 test('danmaku routes stay on their existing responses', async () => {
-  const env = { DB: createDb() };
+  const env = { DB: createDb(), CLEARS_DB: createDb() };
   const list = await worker.fetch(new Request('https://board.test/v1/danmaku'), env);
   assert.equal(list.status, 400);
   const created = await worker.fetch(new Request('https://board.test/v1/danmaku', {

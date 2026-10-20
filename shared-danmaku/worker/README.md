@@ -30,6 +30,6 @@ GAMEBUDDY_SHARED_DANMAKU_URL=https://gamebuddy-shared-danmaku.<你的账号>.wor
 - `POST /v1/clears`（通关记录。同一 `runId` 只保留一行：新建返回 201，重复提交返回已有行和 200）
 - `GET /v1/leaderboard?character=...&ascension=...&gameMode=...`（匹配记录按观察用时、写入时间、`runId` 升序）
 
-通关记录写在独立的 `clears` 表，不进入弹幕表。弹幕接口的请求和响应保持不变。
+通关记录写在另一个 D1 数据库 `gamebuddy-clears` 的 `clears` 表，绑定名是 `CLEARS_DB`。建表只用 `clears-schema.sql`，不要对 `gamebuddy-shared-danmaku` 执行它。弹幕仍使用原来的 `DB` 和 `shared_danmaku` 表。
 
 弹幕只按职业、怪物组合和 `combat/death` 两种时机共享。服务端不保存玩家姓名或完整游戏状态；每个客户端每天最多提交 20 条，同一客户端在同一场景不能重复提交相同内容。

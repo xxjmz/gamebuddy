@@ -226,7 +226,7 @@ async function createClear(request, env) {
   const clear = parseClearBody(body);
   if (!clear) return json({ error: 'invalid_clear' }, 400, request);
   const createdAt = now(env);
-  const inserted = await env.DB.prepare(`
+  const inserted = await env.CLEARS_DB.prepare(`
     INSERT OR IGNORE INTO clears
       (run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
        final_deck, final_relics, selected_events, display_name, player_id, created_at)
@@ -245,7 +245,7 @@ async function createClear(request, env) {
     clear.playerId,
     createdAt
   ).run();
-  const row = await env.DB.prepare(`
+  const row = await env.CLEARS_DB.prepare(`
     SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
            final_deck, final_relics, selected_events, display_name, player_id, created_at
     FROM clears
@@ -271,7 +271,7 @@ function leaderboardQuery(url) {
 async function listLeaderboard(request, env) {
   const query = leaderboardQuery(new URL(request.url));
   if (!query) return json({ error: 'character, ascension and gameMode are required' }, 400, request);
-  const result = await env.DB.prepare(`
+  const result = await env.CLEARS_DB.prepare(`
     SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
            final_deck, final_relics, selected_events, display_name, player_id, created_at
     FROM clears
