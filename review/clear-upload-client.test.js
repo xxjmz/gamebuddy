@@ -6,6 +6,7 @@ const record = {
   character: 'IRONCLAD',
   ascension: 10,
   gameMode: 'Standard',
+  startedAt: 1_700_000_000_000,
   observedDurationSeconds: 321,
   combatSaveLoad: false,
   finalDeck: [{ id: 'STRIKE', upgraded: true }],

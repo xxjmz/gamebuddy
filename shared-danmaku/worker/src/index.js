@@ -180,6 +180,7 @@ function parseClearBody(body) {
   if (!Number.isInteger(body?.observedDurationSeconds) || body.observedDurationSeconds < 0 || body.observedDurationSeconds > 60 * 60 * 24 * 30) {
     return null;
   }
+  if (!Number.isInteger(body?.startedAt) || body.startedAt < 0 || body.startedAt > 4_102_444_800_000) return null;
   if (typeof body?.combatSaveLoad !== 'boolean' || !finalDeck || !finalRelics || !selectedEvents) return null;
   const displayName = String(body?.displayName || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 16) || '匿名人士';
   if (!validToken(body?.playerId, 64)) return null;
@@ -188,6 +189,7 @@ function parseClearBody(body) {
     character: body.character,
     ascension: body.ascension,
     gameMode: body.gameMode,
+    startedAt: body.startedAt,
     observedDurationSeconds: body.observedDurationSeconds,
     combatSaveLoad: body.combatSaveLoad,
     finalDeck,
@@ -205,6 +207,7 @@ function mapClear(row) {
     character: row.character,
     ascension: row.ascension,
     gameMode: row.game_mode,
+    startedAt: row.started_at,
     observedDurationSeconds: row.observed_duration_seconds,
     combatSaveLoad: Boolean(row.combat_save_load),
     finalDeck: JSON.parse(row.final_deck),
@@ -228,14 +231,15 @@ async function createClear(request, env) {
   const createdAt = now(env);
   const inserted = await env.CLEARS_DB.prepare(`
     INSERT OR IGNORE INTO clears
-      (run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
+      (run_id, character, ascension, game_mode, started_at, observed_duration_seconds, combat_save_load,
        final_deck, final_relics, selected_events, display_name, player_id, created_at)
-    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
   `).bind(
     clear.runId,
     clear.character,
     clear.ascension,
     clear.gameMode,
+    clear.startedAt,
     clear.observedDurationSeconds,
     clear.combatSaveLoad ? 1 : 0,
     JSON.stringify(clear.finalDeck),
@@ -246,7 +250,7 @@ async function createClear(request, env) {
     createdAt
   ).run();
   const row = await env.CLEARS_DB.prepare(`
-    SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
+    SELECT run_id, character, ascension, game_mode, started_at, observed_duration_seconds, combat_save_load,
            final_deck, final_relics, selected_events, display_name, player_id, created_at
     FROM clears
     WHERE run_id = ?1
@@ -272,7 +276,7 @@ async function listLeaderboard(request, env) {
   const query = leaderboardQuery(new URL(request.url));
   if (!query) return json({ error: 'character, ascension and gameMode are required' }, 400, request);
   const result = await env.CLEARS_DB.prepare(`
-    SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
+    SELECT run_id, character, ascension, game_mode, started_at, observed_duration_seconds, combat_save_load,
            final_deck, final_relics, selected_events, display_name, player_id, created_at
     FROM clears
     WHERE character = ?1 AND ascension = ?2 AND game_mode = ?3

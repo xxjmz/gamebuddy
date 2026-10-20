@@ -9,6 +9,7 @@ const CLEAR_FIELDS = [
   'character',
   'ascension',
   'gameMode',
+  'startedAt',
   'observedDurationSeconds',
   'combatSaveLoad',
   'finalDeck',
@@ -74,11 +75,13 @@ function clearRecordFromSummary(summary, identity = {}) {
   }
   if (!Number.isInteger(summary.ascension) || summary.ascension < 0) return null;
   if (!Number.isInteger(summary.observedDurationSeconds) || summary.observedDurationSeconds < 0) return null;
+  if (!Number.isInteger(summary.startedAt) || summary.startedAt < 0) return null;
   return {
     runId: summary.runId,
     character: summary.character,
     ascension: summary.ascension,
     gameMode: summary.gameMode,
+    startedAt: summary.startedAt,
     observedDurationSeconds: summary.observedDurationSeconds,
     combatSaveLoad: summary.combatSaveLoad === true,
     finalDeck,

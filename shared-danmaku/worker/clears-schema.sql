@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS clears (
   character TEXT NOT NULL,
   ascension INTEGER NOT NULL,
   game_mode TEXT NOT NULL,
+  started_at INTEGER,
   observed_duration_seconds INTEGER NOT NULL,
   combat_save_load INTEGER NOT NULL CHECK (combat_save_load IN (0, 1)),
   final_deck TEXT NOT NULL,

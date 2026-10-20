@@ -12,13 +12,14 @@ function createDb() {
           return {
             async run() {
               if (!text.includes('INSERT OR IGNORE INTO clears')) throw new Error(text);
-              const [runId, character, ascension, gameMode, duration, saveLoad, deck, relics, events, displayName, playerId, createdAt] = params;
+              const [runId, character, ascension, gameMode, startedAt, duration, saveLoad, deck, relics, events, displayName, playerId, createdAt] = params;
               if (clears.some(row => row.run_id === runId)) return { meta: { changes: 0 } };
               clears.push({
                 run_id: runId,
                 character,
                 ascension,
                 game_mode: gameMode,
+                started_at: startedAt,
                 observed_duration_seconds: duration,
                 combat_save_load: saveLoad,
                 final_deck: deck,
@@ -60,6 +61,7 @@ function record(runId, duration, createdAt) {
     character: 'IRONCLAD',
     ascension: 10,
     gameMode: 'Standard',
+    startedAt: 1_700_000_000_000,
     observedDurationSeconds: duration,
     combatSaveLoad: false,
     finalDeck: [{ id: 'STRIKE', upgraded: true }],
