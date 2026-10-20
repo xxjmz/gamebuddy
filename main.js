@@ -41,6 +41,7 @@ const { DanmakuBridgeAdapter } = require('./agent/danmaku/bridge-adapter');
 const { SharedDanmakuClient } = require('./agent/danmaku/shared-client');
 const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
 const { createFactReviewService } = require('./review/fact-service');
+const { createClearUploadClient, submitClearedRun } = require('./review/clear-upload-client');
 const { createLocalFactStore } = require('./facts/local-fact-store');
 const fs = require('node:fs');
 const { createComposerHost, showComposerHost, setComposerExpanded } = require('./src/danmaku-composer-window');
@@ -127,6 +128,7 @@ function syncCardGuidance(state, readRewardSnapshot = true) {
   } else if (cardGuidanceService.current) cardGuidanceService.clear();
 }
 const sharedDanmakuClient = new SharedDanmakuClient();
+const clearUploadClient = createClearUploadClient();
 let danmakuLlm = null;
 function danmakuLlmOverrides() {
   return {
@@ -889,6 +891,20 @@ function connectBridge() {
           .catch(error => console.warn('GameBuddy danmaku fact skipped:', error.message));
         publishReviewChanged();
         broadcastBridgeStatus('live');
+        try {
+          void submitClearedRun({
+            fact: message.data,
+            stored,
+            replay: BRIDGE_MODE === 'replay' || message.replay === true,
+            facts: () => factStore.getEffectiveFacts(message.data.runId),
+            coverage: () => factStore.getCoverage(message.data.runId),
+            client: clearUploadClient
+          }).then(result => {
+            if (result && result.ok === false) console.warn('GameBuddy clear upload skipped:', result.reason || 'failed');
+          }).catch(error => console.warn('GameBuddy clear upload skipped:', error.message));
+        } catch (error) {
+          console.warn('GameBuddy clear upload skipped:', error.message);
+        }
         return;
       }
       const result = observationStore.ingest(message);

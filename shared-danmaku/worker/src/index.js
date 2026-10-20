@@ -120,6 +120,160 @@ async function reportMessage(request, env, id) {
   return result.meta?.changes ? json({ accepted: true }, 200, request) : json({ error: 'not_found' }, 404, request);
 }
 
+const MAX_CLEAR_ID = 128;
+const MAX_CLEAR_LIST = 300;
+
+function now(env) {
+  return typeof env?.now === 'function' ? Number(env.now()) : Date.now();
+}
+
+function validToken(value, max = MAX_CLEAR_ID) {
+  return typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function validEventText(value) {
+  return typeof value === 'string' && value.length <= MAX_CLEAR_ID && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function parseDeck(value) {
+  if (!Array.isArray(value) || value.length > MAX_CLEAR_LIST) return null;
+  const deck = [];
+  for (const card of value) {
+    if (!card || typeof card !== 'object' || Array.isArray(card)) return null;
+    if (!validToken(card.id) || typeof card.upgraded !== 'boolean') return null;
+    if (Object.keys(card).some(key => key !== 'id' && key !== 'upgraded')) return null;
+    deck.push({ id: card.id, upgraded: card.upgraded });
+  }
+  return deck;
+}
+
+function parseRelics(value) {
+  if (!Array.isArray(value) || value.length > MAX_CLEAR_LIST) return null;
+  const relics = [];
+  for (const relic of value) {
+    if (!relic || typeof relic !== 'object' || Array.isArray(relic)) return null;
+    if (!validToken(relic.id)) return null;
+    if (Object.keys(relic).some(key => key !== 'id')) return null;
+    relics.push({ id: relic.id });
+  }
+  return relics;
+}
+
+function parseEvents(value) {
+  if (!Array.isArray(value) || value.length > MAX_CLEAR_LIST) return null;
+  const events = [];
+  for (const event of value) {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) return null;
+    if (!validEventText(event.eventId) || !validEventText(event.pageId) || !validEventText(event.optionId)) return null;
+    if (Object.keys(event).some(key => key !== 'eventId' && key !== 'pageId' && key !== 'optionId')) return null;
+    events.push({ eventId: event.eventId, pageId: event.pageId, optionId: event.optionId });
+  }
+  return events;
+}
+
+function parseClearBody(body) {
+  const finalDeck = parseDeck(body?.finalDeck);
+  const finalRelics = parseRelics(body?.finalRelics);
+  const selectedEvents = parseEvents(body?.selectedEvents);
+  if (!validToken(body?.runId) || !validToken(body?.character, 64) || !validToken(body?.gameMode, 64)) return null;
+  if (!Number.isInteger(body?.ascension) || body.ascension < 0 || body.ascension > 10000) return null;
+  if (!Number.isInteger(body?.observedDurationSeconds) || body.observedDurationSeconds < 0 || body.observedDurationSeconds > 60 * 60 * 24 * 30) {
+    return null;
+  }
+  if (typeof body?.combatSaveLoad !== 'boolean' || !finalDeck || !finalRelics || !selectedEvents) return null;
+  return {
+    runId: body.runId,
+    character: body.character,
+    ascension: body.ascension,
+    gameMode: body.gameMode,
+    observedDurationSeconds: body.observedDurationSeconds,
+    combatSaveLoad: body.combatSaveLoad,
+    finalDeck,
+    finalRelics,
+    selectedEvents
+  };
+}
+
+function mapClear(row) {
+  if (!row) return null;
+  return {
+    runId: row.run_id,
+    character: row.character,
+    ascension: row.ascension,
+    gameMode: row.game_mode,
+    observedDurationSeconds: row.observed_duration_seconds,
+    combatSaveLoad: Boolean(row.combat_save_load),
+    finalDeck: JSON.parse(row.final_deck),
+    finalRelics: JSON.parse(row.final_relics),
+    selectedEvents: JSON.parse(row.selected_events),
+    createdAt: row.created_at
+  };
+}
+
+async function createClear(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: 'invalid_json' }, 400, request);
+  }
+  const clear = parseClearBody(body);
+  if (!clear) return json({ error: 'invalid_clear' }, 400, request);
+  const createdAt = now(env);
+  const inserted = await env.DB.prepare(`
+    INSERT OR IGNORE INTO clears
+      (run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
+       final_deck, final_relics, selected_events, created_at)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+  `).bind(
+    clear.runId,
+    clear.character,
+    clear.ascension,
+    clear.gameMode,
+    clear.observedDurationSeconds,
+    clear.combatSaveLoad ? 1 : 0,
+    JSON.stringify(clear.finalDeck),
+    JSON.stringify(clear.finalRelics),
+    JSON.stringify(clear.selectedEvents),
+    createdAt
+  ).run();
+  const row = await env.DB.prepare(`
+    SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
+           final_deck, final_relics, selected_events, created_at
+    FROM clears
+    WHERE run_id = ?1
+  `).bind(clear.runId).first();
+  if (!row) return json({ error: 'server_error' }, 500, request);
+  const created = Number(inserted?.meta?.changes || 0) > 0;
+  return json(mapClear(row), created ? 201 : 200, request);
+}
+
+function leaderboardQuery(url) {
+  const character = url.searchParams.get('character');
+  const gameMode = url.searchParams.get('gameMode');
+  const ascensionText = url.searchParams.get('ascension');
+  if (!validToken(character, 64) || !validToken(gameMode, 64) || !/^(0|[1-9]\d*)$/.test(ascensionText || '')) {
+    return null;
+  }
+  const ascension = Number(ascensionText);
+  if (!Number.isInteger(ascension) || ascension > 10000) return null;
+  return { character, ascension, gameMode };
+}
+
+async function listLeaderboard(request, env) {
+  const query = leaderboardQuery(new URL(request.url));
+  if (!query) return json({ error: 'character, ascension and gameMode are required' }, 400, request);
+  const result = await env.DB.prepare(`
+    SELECT run_id, character, ascension, game_mode, observed_duration_seconds, combat_save_load,
+           final_deck, final_relics, selected_events, created_at
+    FROM clears
+    WHERE character = ?1 AND ascension = ?2 AND game_mode = ?3
+    ORDER BY observed_duration_seconds ASC, created_at ASC, run_id ASC
+  `).bind(query.character, query.ascension, query.gameMode).all();
+  const items = (result.results || []).map(mapClear);
+  return json({ items }, 200, request);
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return json({}, 204, request);
@@ -128,6 +282,16 @@ export default {
     if (url.pathname.startsWith('/v1/danmaku/') && request.method === 'POST' && url.pathname.endsWith('/report')) {
       const id = url.pathname.slice('/v1/danmaku/'.length, -'/report'.length);
       return await reportMessage(request, env, id);
+    }
+    if (url.pathname === '/v1/clears' || url.pathname === '/v1/leaderboard') {
+      try {
+        if (url.pathname === '/v1/clears' && request.method === 'POST') return await createClear(request, env);
+        if (url.pathname === '/v1/leaderboard' && request.method === 'GET') return await listLeaderboard(request, env);
+        return json({ error: 'method_not_allowed' }, 405, request);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'server_error' }, 500, request);
+      }
     }
     if (url.pathname !== '/v1/danmaku') return json({ error: 'not_found' }, 404, request);
     try {

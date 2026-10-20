@@ -18,3 +18,19 @@ CREATE INDEX IF NOT EXISTS idx_shared_danmaku_scene
 
 CREATE INDEX IF NOT EXISTS idx_shared_danmaku_author_day
   ON shared_danmaku(author_hash, created_day);
+
+CREATE TABLE IF NOT EXISTS clears (
+  run_id TEXT PRIMARY KEY,
+  character TEXT NOT NULL,
+  ascension INTEGER NOT NULL,
+  game_mode TEXT NOT NULL,
+  observed_duration_seconds INTEGER NOT NULL,
+  combat_save_load INTEGER NOT NULL CHECK (combat_save_load IN (0, 1)),
+  final_deck TEXT NOT NULL,
+  final_relics TEXT NOT NULL,
+  selected_events TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clears_leaderboard
+  ON clears(character, ascension, game_mode, observed_duration_seconds, created_at, run_id);

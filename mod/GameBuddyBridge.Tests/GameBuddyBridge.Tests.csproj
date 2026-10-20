@@ -20,6 +20,7 @@
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyFactEmitter.cs" Link="GameBuddyFactEmitter.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyHookCapabilityRegistry.cs" Link="GameBuddyHookCapabilityRegistry.cs" />
     <Compile Include="../GameBuddyBridge/Scripts/GameBuddyRunIdentityStore.cs" Link="GameBuddyRunIdentityStore.cs" />
+    <Compile Include="../GameBuddyBridge/Scripts/GameBuddyClearFacts.cs" Link="GameBuddyClearFacts.cs" />
     <Compile Include="Program.cs" />
   </ItemGroup>
 </Project>

@@ -7,7 +7,7 @@ const FACT_EVENT_TYPES = new Set([
   'route.offered', 'route.selected', 'map.observed',
   'shop.opened', 'shop.inventory_updated', 'shop.transaction_completed', 'shop.closed',
   'rest.options_offered', 'rest.action_completed',
-  'event.options_offered', 'event.option_selected', 'event.option_resolved',
+  'event.options_offered', 'event.option_selected', 'event.option_resolved', 'event.selected',
   'deck.card_added', 'deck.card_removed', 'deck.card_upgraded', 'deck.card_transformed', 'deck.card_modified',
   'relic.gained', 'relic.lost', 'relic.changed',
   'potion.gained', 'potion.used', 'potion.discarded', 'potion.replaced',

@@ -54,6 +54,41 @@ function encounterLabel(payload) {
   return payload?.bossName || payload?.encounterName || null;
 }
 
+function durationSeconds(startedAt, endedAt) {
+  if (startedAt === null || endedAt === null) return null;
+  return Math.floor(Math.max(0, endedAt - startedAt) / 1000);
+}
+
+function uploadDeck(deck) {
+  if (!Array.isArray(deck)) return [];
+  return deck.flatMap(card => {
+    if (typeof card === 'string' && card) return [{ id: card, upgraded: false }];
+    if (!card || typeof card !== 'object') return [];
+    const id = card.id ?? card.Id;
+    if (typeof id !== 'string' || !id) return [];
+    return [{ id, upgraded: Boolean(card.upgraded || card.Upgraded || card.IsUpgraded) }];
+  });
+}
+
+function uploadRelics(relics) {
+  if (!Array.isArray(relics)) return [];
+  return relics.flatMap(relic => {
+    if (typeof relic === 'string' && relic) return [{ id: relic }];
+    if (!relic || typeof relic !== 'object') return [];
+    const id = relic.id ?? relic.Id;
+    if (typeof id !== 'string' || !id) return [];
+    return [{ id }];
+  });
+}
+
+function selectedEvent(payload) {
+  const eventId = typeof payload?.eventId === 'string' ? payload.eventId.trim() : '';
+  const pageId = typeof payload?.pageId === 'string' ? payload.pageId.trim() : '';
+  const optionId = typeof payload?.optionId === 'string' ? payload.optionId.trim() : '';
+  if (!eventId || !pageId || !optionId) return null;
+  return { eventId, pageId, optionId };
+}
+
 function wholeRunFloor(observations) {
   const explicit = [...observations].reverse().find(fact => number(fact.payload?.totalFloor) !== null);
   if (explicit) return number(explicit.payload.totalFloor);
@@ -80,6 +115,7 @@ function wholeRunFloor(observations) {
 function summarize(runId, facts, coverage) {
   const ended = [...facts].reverse().find(fact => fact.eventType === 'run.ended');
   if (!ended || typeof ended.payload?.cleared !== 'boolean') return null;
+  const opened = facts.find(fact => fact.eventType === 'run.started' || fact.eventType === 'run.resumed');
   const observations = facts.filter(fact => fact.eventType === 'run.observed');
   const first = observations[0]?.payload || {};
   const last = observations.at(-1)?.payload || first;
@@ -98,9 +134,16 @@ function summarize(runId, facts, coverage) {
   let finalBossName = null;
   let finalEncounterKind = null;
   const openCombats = new Map();
+  let combatSaveLoad = false;
+  const selectedEvents = [];
 
   for (const fact of facts) {
     const payload = fact.payload || {};
+    if (fact.eventType === 'combat.attempt_replaced') combatSaveLoad = true;
+    if (fact.eventType === 'event.selected') {
+      const selected = selectedEvent(payload);
+      if (selected) selectedEvents.push(selected);
+    }
     const attemptKey = fact.combatId ? `${fact.combatId}:${fact.attemptGeneration ?? 0}` : null;
     if (fact.eventType === 'combat.started' && attemptKey) {
       const prior = combats.get(fact.combatId) || {};
@@ -212,8 +255,11 @@ function summarize(runId, facts, coverage) {
     runId,
     character: last.character || first.character || 'unknown',
     ascension: number(last.ascension ?? first.ascension),
-    startedAt: number(facts.find(fact => fact.eventType === 'run.started' || fact.eventType === 'run.resumed')?.occurredAt),
+    gameMode: typeof opened?.payload?.gameMode === 'string' ? opened.payload.gameMode : null,
+    startedAt: number(opened?.occurredAt),
     endedAt: number(ended.occurredAt),
+    observedDurationSeconds: durationSeconds(number(opened?.occurredAt), number(ended.occurredAt)),
+    combatSaveLoad,
     result: ended.payload.cleared ? 'win' : ended.payload.reason === 'abandoned' ? 'abandoned' : 'loss',
     endReason: ended.payload.reason || null,
     finalAct: number(last.act),
@@ -232,6 +278,9 @@ function summarize(runId, facts, coverage) {
       relics: Array.isArray(last.relics) ? last.relics : [],
       potions: Array.isArray(last.potions) ? last.potions : []
     },
+    finalDeck: uploadDeck(last.deck),
+    finalRelics: uploadRelics(last.relics),
+    selectedEvents,
     counters,
     coverage: coverage?.families || {}
   };

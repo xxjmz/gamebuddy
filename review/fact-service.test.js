@@ -122,5 +122,79 @@ const guarded = summarize('guarded-run', [
 assert.equal(guarded.counters.playerHpLoss, 4);
 assert.equal(guarded.counters.playerBlocked, 6);
 
+assert.equal(architect.gameMode, null);
+assert.equal(architect.observedDurationSeconds, null);
+assert.equal(architect.combatSaveLoad, false);
+assert.deepEqual(architect.finalDeck, []);
+assert.deepEqual(architect.finalRelics, []);
+assert.deepEqual(architect.selectedEvents, []);
+assert.equal(architect.finalBossName, '建筑师');
+assert.equal(death.combatSaveLoad, true);
+assert.equal(death.result, 'loss');
+
+const cleared = summarize('clear-run', [
+  { eventType: 'run.started', occurredAt: 1_000, payload: { gameMode: 'Standard' } },
+  { eventType: 'run.resumed', occurredAt: 1_500, payload: { gameMode: 'Daily' } },
+  {
+    eventType: 'run.observed', occurredAt: 1_200,
+    payload: {
+      character: 'silent', ascension: 0,
+      deck: [{ id: 'STRIKE', name: 'Strike', upgraded: false, description: 'Deal 6' }],
+      relics: [{ id: 'OLD', name: 'Old relic' }],
+      potions: [{ id: 'EARLY' }],
+      hp: 70
+    }
+  },
+  {
+    eventType: 'run.observed', occurredAt: 4_000,
+    payload: {
+      character: 'silent', ascension: 1,
+      deck: [
+        { id: 'STRIKE', name: 'Strike+', upgraded: true, description: 'Deal 9' },
+        { name: 'missing-id', upgraded: true },
+        { id: 'BASH', Name: 'Bash', Upgraded: false }
+      ],
+      relics: [{ id: 'RING', name: 'Ring', counter: 2 }],
+      potions: [{ id: 'POT', name: 'Potion' }],
+      hp: 3, maxHp: 80, gold: 12
+    }
+  },
+  { eventType: 'event.option_selected', occurredAt: 2_000, payload: { optionId: 'SKIP', label: 'Skip' } },
+  { eventType: 'event.selected', occurredAt: 2_100, payload: { eventId: 'FISH', pageId: 'PAGE', optionId: 'EAT' } },
+  { eventType: 'combat.attempt_replaced', occurredAt: 3_000, payload: { replacedGeneration: 0 } },
+  { eventType: 'run.ended', occurredAt: 4_600, payload: { cleared: true, reason: 'game_ended_victory' } }
+], {});
+assert.equal(cleared.result, 'win');
+assert.equal(cleared.gameMode, 'Standard');
+assert.equal(cleared.startedAt, 1_000);
+assert.equal(cleared.observedDurationSeconds, 3);
+assert.equal(cleared.combatSaveLoad, true);
+assert.equal(cleared.ascension, 1);
+assert.equal(cleared.finalState.hp, 3);
+assert.equal(cleared.finalState.deck[0].name, 'Strike+');
+assert.equal(cleared.finalState.deck[0].description, 'Deal 9');
+assert.deepEqual(cleared.finalState.potions, [{ id: 'POT', name: 'Potion' }]);
+assert.deepEqual(cleared.finalDeck, [
+  { id: 'STRIKE', upgraded: true },
+  { id: 'BASH', upgraded: false }
+]);
+assert.deepEqual(cleared.finalRelics, [{ id: 'RING' }]);
+assert.deepEqual(cleared.selectedEvents, [{ eventId: 'FISH', pageId: 'PAGE', optionId: 'EAT' }]);
+
+const resumedOnly = summarize('resumed-clear', [
+  { eventType: 'run.resumed', occurredAt: 5_000, payload: { gameMode: 'Daily' } },
+  { eventType: 'run.observed', occurredAt: 5_100, payload: { character: 'ironclad', ascension: 0, deck: [], relics: [] } },
+  { eventType: 'run.ended', occurredAt: 5_999, payload: { cleared: true, reason: 'game_ended_victory' } }
+], {});
+assert.equal(resumedOnly.gameMode, 'Daily');
+assert.equal(resumedOnly.observedDurationSeconds, 0);
+assert.equal(resumedOnly.combatSaveLoad, false);
+
+const rewound = summarize('rewound-clear', [
+  { eventType: 'run.started', occurredAt: 2_000, payload: { gameMode: 'Standard' } },
+  { eventType: 'run.ended', occurredAt: 1_000, payload: { cleared: true, reason: 'game_ended_victory' } }
+], {});
+assert.equal(rewound.observedDurationSeconds, 0);
+
 fs.rmSync(directory, { recursive: true, force: true });
 console.log('Fact review service tests passed.');

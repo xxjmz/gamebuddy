@@ -53,6 +53,8 @@ public static class GameBuddyExporter
     private static string _lastEventSignature = string.Empty;
     private static bool _eventChoiceOpen;
     private static string? _activeEventDecisionId;
+    private static string? _activeEventId;
+    private static string? _activeEventPageId;
     private static string _lastShopSignature = string.Empty;
     private static bool _shopOpen;
     private static string? _activeShopDecisionId;
@@ -175,7 +177,7 @@ public static class GameBuddyExporter
         {
             runId = _activeRunId,
             character = player.Character.Id.Entry,
-            ascension = ReadIntValue(ReadMember(runState, "Ascension", "AscensionLevel")),
+            ascension = ReadIntValue(ReadMember(runState, "AscensionLevel", "Ascension")),
             startedAt = _activeRunStartedAt
         });
     }
@@ -420,6 +422,8 @@ public static class GameBuddyExporter
             if (!_eventChoiceOpen) _activeEventDecisionId = $"event:{Guid.NewGuid():N}";
             _lastEventSignature = signature;
             _eventChoiceOpen = true;
+            _activeEventId = snapshot.Event!.EventId;
+            _activeEventPageId = snapshot.Event.PageId;
             GameBuddyFactEmitter.Publish("event.options_offered", new
             {
                 eventId = snapshot.Event!.EventId,
@@ -445,6 +449,8 @@ public static class GameBuddyExporter
             _lastEventSignature = string.Empty;
             _activeEventDecisionId = null;
             PublishEvent("event.closed");
+            _activeEventId = null;
+            _activeEventPageId = null;
         }
     }
 
@@ -500,6 +506,13 @@ public static class GameBuddyExporter
             outcome = (string?)null
         }, decisionId: _activeEventDecisionId, actionId: actionId, observationMethod: "direct_hook",
             unknownReasons: new Dictionary<string, string> { ["payload.outcome"] = "not_observed" });
+        var selectedEvent = GameBuddyClearFacts.EventSelected(
+            _activeEventId, _activeEventPageId, ReadTextMember(option, "Id", "OptionId"));
+        if (selectedEvent is not null)
+        {
+            GameBuddyFactEmitter.Publish("event.selected", selectedEvent,
+                decisionId: _activeEventDecisionId, actionId: actionId, observationMethod: "direct_hook");
+        }
     }
 
     private static EventSnapshot? BuildEventSnapshot(RunState runState)
@@ -827,7 +840,7 @@ public static class GameBuddyExporter
                 secondBoss,
                 _activeRunId,
                 _activeRunStartedAt,
-                ReadIntValue(ReadMember(runState, "Ascension", "AscensionLevel")),
+                ReadIntValue(ReadMember(runState, "AscensionLevel", "Ascension")),
                 _maxTurnDamage,
                 string.Equals(currentPoint?.PointType.ToString(), "Boss", StringComparison.OrdinalIgnoreCase) ? nextBossId : null,
                 string.Equals(currentPoint?.PointType.ToString(), "Boss", StringComparison.OrdinalIgnoreCase) ? nextBoss : null),

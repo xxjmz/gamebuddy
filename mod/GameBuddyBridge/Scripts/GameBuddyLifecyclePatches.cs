@@ -31,7 +31,8 @@ public static class GameBuddyLifecyclePatches
             GameBuddyFactEmitter.BeginNewRun(fingerprint, new
             {
                 setupPath = __originalMethod.Name,
-                fingerprintVersion = 1
+                fingerprintVersion = 1,
+                gameMode = GameBuddyClearFacts.GameModeText(ReadRunStateGameMode(__args))
             });
         }
         catch (Exception ex)
@@ -48,7 +49,8 @@ public static class GameBuddyLifecyclePatches
             GameBuddyFactEmitter.ResumeRun(fingerprint, new
             {
                 setupPath = __originalMethod.Name,
-                fingerprintVersion = 1
+                fingerprintVersion = 1,
+                gameMode = GameBuddyClearFacts.GameModeText(ReadRunStateGameMode(__args))
             });
         }
         catch (Exception ex)
@@ -160,5 +162,49 @@ public static class GameBuddyLifecyclePatches
         var type = source.GetType();
         return type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(source)
             ?? type.GetField(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(source);
+    }
+
+    private static object? ReadRunStateGameMode(IEnumerable<object?> arguments)
+    {
+        try
+        {
+            foreach (var argument in arguments)
+            {
+                var value = GameModeValue(argument);
+                if (value is not null) return value;
+            }
+            return GameModeValue(CurrentRunState());
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static object? GameModeValue(object? source)
+    {
+        if (!IsRunState(source)) return null;
+        return ReadMember(source!, "GameMode");
+    }
+
+    private static bool IsRunState(object? source)
+    {
+        if (source is null) return false;
+        for (var type = source.GetType(); type is not null; type = type.BaseType)
+        {
+            if (type.FullName == "MegaCrit.Sts2.Core.Runs.RunState" || type.Name == "RunState") return true;
+        }
+        return false;
+    }
+
+    private static object? CurrentRunState()
+    {
+        var runManagerType = AccessTools.TypeByName("MegaCrit.Sts2.Core.Runs.RunManager");
+        if (runManagerType is null) return null;
+        var instance = runManagerType.GetProperty("Instance", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(null);
+        if (instance is null) return null;
+        var method = runManagerType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .FirstOrDefault(candidate => candidate.Name == "DebugOnlyGetState" && candidate.GetParameters().Length == 0);
+        return method?.Invoke(instance, null);
     }
 }

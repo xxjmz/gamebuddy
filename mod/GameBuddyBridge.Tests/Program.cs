@@ -431,3 +431,73 @@ catch { }
 finally { GameBuddyRunEnding.ExitAbandon(); }
 Assert(GameBuddyRunEnding.Resolve(false).Result == "loss", "Exception cleanup leaked abandonment state.");
 Console.WriteLine("Explicit abandonment and nested run-end ordering passed.");
+
+string Slice(string source, string start, string end)
+{
+    var from = source.IndexOf(start, StringComparison.Ordinal);
+    if (from < 0) throw new InvalidOperationException($"Missing {start}");
+    var to = source.IndexOf(end, from + start.Length, StringComparison.Ordinal);
+    if (to < 0) throw new InvalidOperationException($"Missing {end}");
+    return source.Substring(from, to - from);
+}
+
+string Repo(string relative)
+{
+    var dir = new DirectoryInfo(AppContext.BaseDirectory);
+    while (dir is not null)
+    {
+        var candidate = Path.Combine(dir.FullName, relative);
+        if (File.Exists(candidate)) return candidate;
+        dir = dir.Parent;
+    }
+    throw new InvalidOperationException($"Missing {relative}");
+}
+
+var lifecycle = File.ReadAllText(Repo(Path.Combine("mod", "GameBuddyBridge", "Scripts", "GameBuddyLifecyclePatches.cs")));
+var exporter = File.ReadAllText(Repo(Path.Combine("mod", "GameBuddyBridge", "Scripts", "GameBuddyExporter.cs")));
+var fingerprint = Slice(lifecycle, "private static string Fingerprint", "private static string NormalizeTime");
+Assert(fingerprint.Contains("if (startTime is null)", StringComparison.Ordinal), "Fingerprint lost the StartTime gate.");
+Assert(fingerprint.Contains("AddMember(values, argument, \"AscensionLevel\")", StringComparison.Ordinal),
+    "Ascension no longer participates in the run fingerprint.");
+Assert(!fingerprint.Contains("gameMode", StringComparison.Ordinal), "Fingerprint gained a gameMode field.");
+Assert(fingerprint.Split("AddMember(values, argument, \"GameMode\")").Length - 1 == 1,
+    "GameMode fingerprint membership changed.");
+var ended = Slice(lifecycle, "public static void EndedPostfix", "public static void AbandonedPostfix");
+var observation = ended.IndexOf("PublishFinalFactObservation", StringComparison.Ordinal);
+var endRun = ended.IndexOf("EndRun(cleared, ending.Reason)", StringComparison.Ordinal);
+var authoritative = ended.IndexOf("AuthoritativeRunEnded", StringComparison.Ordinal);
+Assert(observation >= 0 && endRun > observation && authoritative > endRun, "EndedPostfix order changed.");
+Assert(lifecycle.Split("gameMode = GameBuddyClearFacts.GameModeText(ReadRunStateGameMode(__args))").Length - 1 == 2,
+    "gameMode must be added to both run.started and run.resumed.");
+var opened = Slice(exporter, "PublishEvent(\"event.opened\"", "PublishEvent(\"event.closed\")");
+Assert(opened.Contains("title = snapshot.Event!.Title", StringComparison.Ordinal), "event.opened title changed.");
+Assert(opened.Contains("kind = snapshot.Event.Kind", StringComparison.Ordinal), "event.opened kind changed.");
+Assert(opened.Contains("eventId = snapshot.Event.EventId", StringComparison.Ordinal), "event.opened eventId changed.");
+Assert(opened.Contains("pageId = snapshot.Event.PageId", StringComparison.Ordinal), "event.opened pageId changed.");
+Assert(opened.Contains("description = snapshot.Event.Description", StringComparison.Ordinal), "event.opened description changed.");
+Assert(opened.Contains("options = choosable", StringComparison.Ordinal), "event.opened options changed.");
+Assert(!opened.Contains("optionId", StringComparison.Ordinal), "event.opened gained an option id.");
+var closedAt = exporter.IndexOf("PublishEvent(\"event.closed\")", StringComparison.Ordinal);
+Assert(exporter.Substring(closedAt, "PublishEvent(\"event.closed\");".Length) == "PublishEvent(\"event.closed\");",
+    "event.closed gained a payload.");
+var optionSelected = Slice(exporter, "\"event.option_selected\"", "\"event.option_resolved\"");
+Assert(optionSelected.Contains("optionId = ReadTextMember(option, \"Id\", \"OptionId\")", StringComparison.Ordinal),
+    "Existing option selection id changed.");
+Assert(optionSelected.Contains("label = FormatLoc", StringComparison.Ordinal), "Existing option selection label changed.");
+Assert(exporter.Contains("\"event.selected\"", StringComparison.Ordinal), "Confirmed options must emit event.selected.");
+Assert(GameBuddyClearFacts.GameModeText(null) is null, "Missing game mode must stay empty.");
+Assert(GameBuddyClearFacts.GameModeText("  Standard  ") == "Standard", "Game mode text was not trimmed.");
+Assert(GameBuddyClearFacts.GameModeText("   ") is null, "Blank game mode was kept.");
+Assert(GameBuddyClearFacts.GameModeText(DayOfWeek.Friday) == "Friday", "Game mode should stringify like other reflected values.");
+var selectedJson = JsonSerializer.Serialize(
+    GameBuddyClearFacts.EventSelected("BIG_FISH", "INITIAL", "BANANA"),
+    new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+using (var selectedDocument = JsonDocument.Parse(selectedJson))
+{
+    var selected = selectedDocument.RootElement;
+    Assert(selected.GetProperty("eventId").GetString() == "BIG_FISH", "event.selected eventId mismatch.");
+    Assert(selected.GetProperty("pageId").GetString() == "INITIAL", "event.selected pageId mismatch.");
+    Assert(selected.GetProperty("optionId").GetString() == "BANANA", "event.selected optionId mismatch.");
+    Assert(selected.EnumerateObject().Count() == 3, "event.selected gained an extra field.");
+}
+Console.WriteLine("Cleared-run fact shape tests passed.");

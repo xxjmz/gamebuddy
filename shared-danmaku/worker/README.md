@@ -27,5 +27,9 @@ GAMEBUDDY_SHARED_DANMAKU_URL=https://gamebuddy-shared-danmaku.<你的账号>.wor
 - `GET /v1/danmaku?sceneKey=...&phase=combat`（返回该场景当前全部有效弹幕）
 - `POST /v1/danmaku`
 - `POST /v1/danmaku/{id}/report`
+- `POST /v1/clears`（通关记录。同一 `runId` 只保留一行：新建返回 201，重复提交返回已有行和 200）
+- `GET /v1/leaderboard?character=...&ascension=...&gameMode=...`（匹配记录按观察用时、写入时间、`runId` 升序）
+
+通关记录写在独立的 `clears` 表，不进入弹幕表。弹幕接口的请求和响应保持不变。
 
 弹幕只按职业、怪物组合和 `combat/death` 两种时机共享。服务端不保存玩家姓名或完整游戏状态；每个客户端每天最多提交 20 条，同一客户端在同一场景不能重复提交相同内容。
