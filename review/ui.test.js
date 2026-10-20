@@ -182,4 +182,129 @@ const idFallback = window.GameBuddyReviewUi.render({
 assert.match(idFallback, /STRIKE_R/);
 assert.match(idFallback, /BURNING_BLOOD/);
 
+assert.match(html, /id="review-open-leaderboard">通关榜/);
+
+const leaderboardItems = [
+  {
+    runId: 'slow-run-hidden',
+    displayName: '慢<script>"&',
+    observedDurationSeconds: 4000,
+    combatSaveLoad: true,
+    finalDeck: [{ id: 'CARD<img>', upgraded: true }],
+    finalRelics: [{ id: 'RELIC"&' }],
+    selectedEvents: [{ eventId: 'E<script>', pageId: 'P"&', optionId: 'O' }],
+    playerId: 'pid-hide-slow',
+    createdAt: 'secret-created'
+  },
+  {
+    runId: 'fast-run-hidden',
+    displayName: '   ',
+    observedDurationSeconds: 5,
+    combatSaveLoad: false,
+    finalDeck: [],
+    finalRelics: [],
+    selectedEvents: [],
+    playerId: 'pid-hide-fast'
+  },
+  {
+    runId: 'odd-run',
+    displayName: '',
+    observedDurationSeconds: 1.5,
+    combatSaveLoad: 'yes',
+    finalDeck: null,
+    finalRelics: null,
+    selectedEvents: null,
+    playerId: 'pid-hide-odd'
+  }
+];
+const filters = { character: 'silent', ascension: '10', gameMode: 'Daily' };
+const board = window.GameBuddyReviewUi.renderLeaderboard({
+  filters,
+  status: 'success',
+  items: leaderboardItems,
+  expandedRunId: 'slow-run-hidden',
+  filterError: ''
+});
+const slowRank = board.indexOf('leaderboard-rank">1<');
+const slowName = board.indexOf('leaderboard-name">慢&lt;script&gt;&quot;&amp;');
+const fastRank = board.indexOf('leaderboard-rank">2<');
+const fastName = board.indexOf('leaderboard-name">匿名人士');
+assert.ok(slowRank !== -1 && slowRank < slowName && slowName < fastRank && fastRank < fastName);
+assert.match(board, /01:06:40/);
+assert.match(board, /00:05/);
+assert.match(board, /有战斗内读档/);
+assert.match(board, /无战斗内读档/);
+assert.match(board, /未知/);
+assert.match(board, /终局牌组/);
+assert.match(board, /终局遗物/);
+assert.match(board, /事件选择/);
+assert.match(board, /CARD&lt;img&gt;/);
+assert.match(board, /RELIC&quot;&amp;/);
+assert.match(board, /E&lt;script&gt; \/ P&quot;&amp; \/ O/);
+assert.match(board, /aria-label="已升级">\+/);
+assert.doesNotMatch(board, /慢<script>/);
+assert.doesNotMatch(board, /CARD<img>/);
+assert.doesNotMatch(board, /pid-hide-slow|pid-hide-fast|pid-hide-odd/);
+assert.equal(board.split('slow-run-hidden').length, 2);
+assert.equal(board.split('fast-run-hidden').length, 2);
+assert.doesNotMatch(board, /secret-created/);
+assert.match(board, /<option value="silent" selected>静默猎手<\/option>/);
+assert.match(board, /<option value="Daily" selected>每日<\/option>/);
+assert.match(board, /min="0"/);
+assert.match(board, /max="10000"/);
+assert.match(board, /step="1"/);
+assert.match(board, /value="10"/);
+assert.match(board, /返回个人数据/);
+assert.doesNotMatch(board, /无记录/);
+
+const collapsedBoard = window.GameBuddyReviewUi.renderLeaderboard({
+  filters: { character: 'ironclad', ascension: '0', gameMode: 'Standard' },
+  status: 'success',
+  items: [leaderboardItems[1]],
+  expandedRunId: null
+});
+assert.doesNotMatch(collapsedBoard, /终局牌组|事件选择/);
+assert.match(collapsedBoard, /<option value="ironclad" selected>铁甲战士<\/option>/);
+assert.match(collapsedBoard, /<option value="Standard" selected>标准<\/option>/);
+
+const emptyDetail = window.GameBuddyReviewUi.renderLeaderboard({
+  filters: { character: 'ironclad', ascension: '0', gameMode: 'Standard' },
+  status: 'success',
+  items: [leaderboardItems[1]],
+  expandedRunId: 'fast-run-hidden'
+});
+assert.equal((emptyDetail.match(/无记录/g) || []).length, 3);
+
+const loadingBoard = window.GameBuddyReviewUi.renderLeaderboard({
+  filters: { character: 'ironclad', ascension: '0', gameMode: 'Standard' },
+  status: 'loading',
+  items: leaderboardItems,
+  filterError: ''
+});
+assert.match(loadingBoard, /正在读取通关榜…/);
+assert.match(loadingBoard, /id="leaderboard-submit" disabled/);
+assert.doesNotMatch(loadingBoard, /pid-hide-slow/);
+assert.match(loadingBoard, /id="leaderboard-character"/);
+
+const emptyBoard = window.GameBuddyReviewUi.renderLeaderboard({
+  filters: { character: 'regent', ascension: '0', gameMode: 'Custom' },
+  status: 'empty',
+  items: []
+});
+assert.match(emptyBoard, /当前条件下暂无通关记录/);
+assert.match(emptyBoard, /<option value="Custom" selected>自定义<\/option>/);
+assert.match(emptyBoard, /故障机器人/);
+assert.match(emptyBoard, /死灵法师/);
+
+const errorBoard = window.GameBuddyReviewUi.renderLeaderboard({
+  filters: { character: 'ironclad', ascension: '"><script>', gameMode: 'Standard' },
+  status: 'error',
+  filterError: 'ascension'
+});
+assert.match(errorBoard, /通关榜读取失败/);
+assert.match(errorBoard, /id="leaderboard-retry">重试/);
+assert.match(errorBoard, /请修正筛选条件。进阶需为 0 到 10000 的整数。/);
+assert.match(errorBoard, /value="&quot;&gt;&lt;script&gt;"/);
+assert.doesNotMatch(errorBoard, /"><script>/);
+
 console.log('Review UI tests passed.');

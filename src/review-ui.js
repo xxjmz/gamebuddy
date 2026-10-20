@@ -168,6 +168,7 @@
             </form>
             <div class="review-actions">
               <span>仅保存在本机</span>
+              <button type="button" id="review-open-leaderboard">通关榜</button>
               <button type="button" id="review-export">导出</button>
               <button type="button" id="review-clear">清空</button>
             </div>
@@ -202,5 +203,134 @@
       </section>`;
   }
 
-  globalScope.GameBuddyReviewUi = { render, characterName, pointsForRadius };
+  function formatDuration(seconds) {
+    if (!Number.isInteger(seconds) || seconds < 0) return '未知';
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    const clock = `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    return hours > 0 ? `${String(hours).padStart(2, '0')}:${clock}` : clock;
+  }
+
+  function leaderboardName(value) {
+    const name = String(value ?? '').trim();
+    return name || '匿名人士';
+  }
+
+  function leaderboardCards(deck) {
+    if (!Array.isArray(deck) || !deck.length) return '<p class="leaderboard-empty">无记录</p>';
+    return `<div class="review-build-grid">${deck.map(card => {
+      const id = escapeHtml(card && typeof card === 'object' ? (card.id || '未知') : '未知');
+      const upgraded = Boolean(card && typeof card === 'object' && card.upgraded === true);
+      return `<span class="review-card-chip"><span class="review-card-name">${id}</span>${upgraded ? '<span class="review-card-upgrade" aria-label="已升级">+</span>' : ''}</span>`;
+    }).join('')}</div>`;
+  }
+
+  function leaderboardRelics(relics) {
+    if (!Array.isArray(relics) || !relics.length) return '<p class="leaderboard-empty">无记录</p>';
+    return `<div class="review-build-grid">${relics.map(relic => {
+      const id = escapeHtml(relic && typeof relic === 'object' ? (relic.id || '未知') : '未知');
+      return `<span class="review-relic-badge">${id}</span>`;
+    }).join('')}</div>`;
+  }
+
+  function leaderboardEvents(events) {
+    if (!Array.isArray(events) || !events.length) return '<p class="leaderboard-empty">无记录</p>';
+    const lines = events
+      .filter(event => event && typeof event === 'object' && !Array.isArray(event))
+      .map(event => `${escapeHtml(event.eventId ?? '')} / ${escapeHtml(event.pageId ?? '')} / ${escapeHtml(event.optionId ?? '')}`);
+    if (!lines.length) return '<p class="leaderboard-empty">无记录</p>';
+    return `<ul class="leaderboard-events">${lines.map(line => `<li>${line}</li>`).join('')}</ul>`;
+  }
+
+  function leaderboardSection(title, body) {
+    return `<section class="review-build-section"><div class="review-build-heading"><strong>${title}</strong></div>${body}</section>`;
+  }
+
+  function leaderboardDetail(item, panelId) {
+    return `
+      <div class="leaderboard-detail" id="${panelId}" role="region" aria-label="通关详情">
+        ${leaderboardSection('终局牌组', leaderboardCards(item?.finalDeck))}
+        ${leaderboardSection('终局遗物', leaderboardRelics(item?.finalRelics))}
+        ${leaderboardSection('事件选择', leaderboardEvents(item?.selectedEvents))}
+      </div>`;
+  }
+
+  function leaderboardRows(items, expandedRunId) {
+    return (items || []).map((item, index) => {
+      const runKey = item?.runId == null ? `row-${index}` : String(item.runId);
+      const expanded = expandedRunId != null && String(expandedRunId) === runKey;
+      const panelId = `leaderboard-detail-${index}`;
+      const name = leaderboardName(item?.displayName);
+      const duration = formatDuration(item?.observedDurationSeconds);
+      const saveLabel = item?.combatSaveLoad === true ? '有战斗内读档' : '无战斗内读档';
+      const rank = index + 1;
+      return `
+        <div class="leaderboard-entry">
+          <div class="leaderboard-row${expanded ? ' is-expanded' : ''}" role="button" tabindex="0" data-run-id="${escapeHtml(runKey)}" aria-expanded="${expanded ? 'true' : 'false'}" aria-controls="${panelId}" aria-label="第 ${rank} 名 ${escapeHtml(name)} ${duration} ${saveLabel}">
+            <b class="leaderboard-rank">${rank}</b>
+            <strong class="leaderboard-name">${escapeHtml(name)}</strong>
+            <span class="leaderboard-time">${duration}</span>
+            <span class="leaderboard-save">${saveLabel}</span>
+          </div>
+          ${expanded ? leaderboardDetail(item, panelId) : ''}
+        </div>`;
+    }).join('');
+  }
+
+  const LEADERBOARD_CHARACTERS = [
+    ['ironclad', '铁甲战士'],
+    ['silent', '静默猎手'],
+    ['defect', '故障机器人'],
+    ['regent', '统御者'],
+    ['necrobinder', '死灵法师']
+  ];
+  const LEADERBOARD_MODES = [
+    ['Standard', '标准'],
+    ['Daily', '每日'],
+    ['Custom', '自定义']
+  ];
+
+  function leaderboardOptions(options, current) {
+    return options.map(([value, label]) => (
+      `<option value="${escapeHtml(value)}"${value === current ? ' selected' : ''}>${escapeHtml(label)}</option>`
+    )).join('');
+  }
+
+  function renderLeaderboard(state = {}) {
+    const filters = state.filters || { character: 'ironclad', ascension: '0', gameMode: 'Standard' };
+    const status = state.status || 'idle';
+    let results = '';
+    if (status === 'loading') {
+      results = '<p class="leaderboard-status" role="status">正在读取通关榜…</p>';
+    } else if (status === 'error') {
+      results = '<div class="leaderboard-status" role="alert"><p>通关榜读取失败</p><button type="button" id="leaderboard-retry">重试</button></div>';
+    } else if (status === 'empty') {
+      results = '<p class="leaderboard-status" role="status">当前条件下暂无通关记录</p>';
+    } else if (status === 'success') {
+      results = `
+        <div class="leaderboard-columns" aria-hidden="true"><span>名次</span><span>榜上名称</span><span>观察用时</span><span>战斗内读档</span></div>
+        <div class="leaderboard-list">${leaderboardRows(state.items, state.expandedRunId)}</div>`;
+    }
+    const alert = state.filterError
+      ? `<p class="leaderboard-filter-error" role="alert">请修正筛选条件。${state.filterError === 'ascension' ? '进阶需为 0 到 10000 的整数。' : '请检查角色和模式。'}</p>`
+      : '';
+    return `
+      <section class="review-page leaderboard-page" aria-label="通关榜">
+        <div class="review-pattern" aria-hidden="true"></div>
+        <header class="leaderboard-header">
+          <button type="button" id="review-back-personal">返回个人数据</button>
+          <h1 class="leaderboard-title">通关榜</h1>
+        </header>
+        <form class="leaderboard-filters" id="leaderboard-form">
+          <label>角色<select id="leaderboard-character" name="character">${leaderboardOptions(LEADERBOARD_CHARACTERS, filters.character)}</select></label>
+          <label>进阶<input id="leaderboard-ascension" name="ascension" type="number" min="0" max="10000" step="1" inputmode="numeric" value="${escapeHtml(filters.ascension)}"></label>
+          <label>模式<select id="leaderboard-mode" name="gameMode">${leaderboardOptions(LEADERBOARD_MODES, filters.gameMode)}</select></label>
+          <button type="submit" id="leaderboard-submit"${status === 'loading' ? ' disabled' : ''}>查询</button>
+        </form>
+        <div class="leaderboard-results">${alert}${results}</div>
+      </section>`;
+  }
+
+  globalScope.GameBuddyReviewUi = { render, renderLeaderboard, characterName, pointsForRadius };
 })(window);

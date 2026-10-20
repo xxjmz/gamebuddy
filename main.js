@@ -42,6 +42,7 @@ const { SharedDanmakuClient } = require('./agent/danmaku/shared-client');
 const { DanmakuLlmAtmosphere } = require('./agent/danmaku/llm-atmosphere');
 const { createFactReviewService } = require('./review/fact-service');
 const { createClearUploadClient, submitClearedRun } = require('./review/clear-upload-client');
+const { createLeaderboardClient, projectLeaderboardRequest } = require('./review/leaderboard-client');
 const { loadPlayerProfile, saveDisplayName } = require('./review/player-profile');
 const { createLocalFactStore } = require('./facts/local-fact-store');
 const fs = require('node:fs');
@@ -130,6 +131,7 @@ function syncCardGuidance(state, readRewardSnapshot = true) {
 }
 const sharedDanmakuClient = new SharedDanmakuClient();
 const clearUploadClient = createClearUploadClient();
+const leaderboardClient = createLeaderboardClient();
 let danmakuLlm = null;
 function danmakuLlmOverrides() {
   return {
@@ -1355,6 +1357,9 @@ ipcMain.on('accept-decision', (_event, decision) => {
 });
 ipcMain.on('clear-llm-log', () => clearLlmLog());
 ipcMain.handle('get-observation', () => currentObservation());
+ipcMain.handle('review:listLeaderboard', (_event, input) => (
+  leaderboardClient.list(projectLeaderboardRequest(input))
+));
 ipcMain.handle('review:getDashboard', () => reviewService.getDashboard());
 ipcMain.handle('review:getPlayerProfile', () => {
   const profile = loadPlayerProfile(app.getPath('userData'));

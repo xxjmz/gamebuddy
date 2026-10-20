@@ -58,6 +58,11 @@ contextBridge.exposeInMainWorld('gamebuddyBridge', {
   exportReview: () => ipcRenderer.invoke('review:export'),
   requestReviewClear: () => ipcRenderer.invoke('review:requestClear'),
   clearReview: token => ipcRenderer.invoke('review:clear', token),
+  listLeaderboard: filters => ipcRenderer.invoke('review:listLeaderboard', {
+    character: filters?.character,
+    ascension: filters?.ascension,
+    gameMode: filters?.gameMode
+  }),
   getSharedDanmakuContext: () => ipcRenderer.invoke('get-shared-danmaku-context'),
   submitSharedDanmaku: text => ipcRenderer.invoke('submit-shared-danmaku', { text }),
   refreshRecommendation: () => ipcRenderer.invoke('refresh-recommendation'),
