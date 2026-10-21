@@ -1,11 +1,11 @@
 # GameBuddy Windows 安装指南
 
-GameBuddy Windows 版。安装包构建编号：v0.2.7。
+GameBuddy Windows 版。安装包构建编号：v0.2.9。
 
 ## 准备
 
 - Windows 10/11 x64，已安装 Steam 版《杀戮尖塔 2》。Mod 适配基线为 stable v0.107.1，其他游戏版本尚未确认。
-- 下载 **GameBuddy-Setup-0.2.7.exe**（已内置 Bridge）。一般不需要再下 Bridge ZIP。
+- 下载 **GameBuddy-Setup-0.2.9.exe**（已内置 Bridge）。一般不需要再下 Bridge ZIP。
 - 使用 AI 需自备支持 OpenAI 兼容接口的模型服务、API Key、Base URL、模型 ID 和可用额度。无需安装 Node.js、npm、.NET SDK 或自行编译。
 
 ## 1. 安装桌面端与 Bridge
@@ -22,7 +22,7 @@ GameBuddy Windows 版。安装包构建编号：v0.2.7。
 若安装时跳过了目录选择，可任选其一：
 
 - 把 GameBuddy 安装目录下的 `resources\bridge` 内两个文件复制到游戏 `mods\GameBuddyBridge`；或
-- 下载 `GameBuddy-Bridge-0.2.7.zip`，解压后把其中的 `GameBuddyBridge` 文件夹复制到游戏 `mods`（避免重复嵌套）。
+- 下载 `GameBuddy-Bridge-0.2.9.zip`，解压后把其中的 `GameBuddyBridge` 文件夹复制到游戏 `mods`（避免重复嵌套）。
 
 需同时有 `gamebuddy_bridge.dll` 和 `GameBuddyBridge.json`。
 

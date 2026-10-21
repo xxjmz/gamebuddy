@@ -7,4 +7,4 @@ Godot SDK: Godot.NET.Sdk/4.5.1
 Manifest id: gamebuddy_bridge
 Manifest version: 0.1.0
 
-The distributed DLL was rebuilt on 2026-10-19 from the current GameBuddyBridge source against the local Slay the Spire 2 Windows assemblies. It includes the card guidance overlay used by the build-system prompts.
+The distributed DLL was rebuilt on 2026-10-20 from the current GameBuddyBridge source against the local Slay the Spire 2 Windows assemblies. It records RunState.GameMode and event.selected in addition to the existing clear facts.

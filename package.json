@@ -1,6 +1,6 @@
 {
   "name": "gamebuddy",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "private": true,
   "description": "A real-time AI companion for Slay the Spire 2",
   "main": "main.js",
