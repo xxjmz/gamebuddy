@@ -91,6 +91,28 @@ app.whenReady().then(async () => {
   })`);
   assert.deepEqual(labels.ai, preview.map(item => item[1]));
   assert.match(labels.skill, /技能.*小啃兽（2）.*顶撞/);
+  const skillLayout = await window.webContents.executeJavaScript(`(() => {
+    const skill = document.querySelector('.danmaku-skill');
+    const text = skill.querySelector('.gb-danmaku__text');
+    const before = skill.getBoundingClientRect().width;
+    text.textContent = '你要是一直盯着我看，这招可就来不及躲了。你站得这么近，我就当你答应接招了。';
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    return {
+      before,
+      after: skill.getBoundingClientRect().width,
+      lines: range.getClientRects().length,
+      visible: text.getBoundingClientRect().width >= range.getBoundingClientRect().width,
+      monsterFont: getComputedStyle(text).fontSize,
+      characterFont: getComputedStyle(document.querySelector('[data-source="ai"] .gb-danmaku__text')).fontSize,
+      accent: getComputedStyle(skill).getPropertyValue('--gb-accent').trim()
+    };
+  })()`);
+  assert.ok(skillLayout.after > skillLayout.before);
+  assert.equal(skillLayout.lines, 1);
+  assert.equal(skillLayout.visible, true);
+  assert.equal(skillLayout.monsterFont, skillLayout.characterFont);
+  assert.equal(skillLayout.accent, '#d9a5ff');
   assert.equal(labels.skillAvatars, 0);
   assert.match(labels.detail, /Mod 当前行动数据/);
   assert.deepEqual(labels.aiDetail,preview.map(item=>item[2]));
