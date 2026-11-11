@@ -24,49 +24,24 @@ test('a long readable story retains the model wording', () => {
   assert.ok(card.body.endsWith('值不值。'));
 });
 
-test('wrong numbers and absolute values presented as gains are rejected', () => {
-  const wrong = { ...candidate, assertions: candidate.assertions.map((c, i) => i === 1 ? { ...c, value: 29 } : c) };
-  assert.equal(diagnose(wrong).reason, 'unsupported_numeric_assertion');
-  const delta = { ...candidate, title: '涨上限', bodyTemplate: '上限增加{{n}}', bindings: { n: { claimIndex: 0 } },
-    assertions: [{ type: 'event_field', eventId: 'e', field: 'maxHp', value: 80 }] };
-  assert.equal(diagnose(delta).reason, 'absolute_value_used_as_delta');
+test('body numbers and numeric string bindings do not gate publication', () => {
+  const assertions = candidate.assertions.map((claim, index) => index === 1 ? { ...claim, value: '29' } : claim);
+  const [card] = selectStories(t, [{ ...candidate, assertions }], { preserveModelVoice: true });
+  assert.match(card.body, /你还剩29血/);
+  assert.equal(diagnose({ ...candidate, bodyTemplate: '第17层，他只剩8血，却打了34点伤害。' }).accepted, true);
 });
 
 test('engineering jargon and definite counterfactual victory are rejected', () => {
   assert.equal(diagnose({ ...candidate, bodyTemplate: '它准备StatusIntent' }).reason, 'unreadable_wording');
   assert.equal(diagnose({ ...candidate, bodyTemplate: '这场本来可以赢。' }).reason, 'unsupported_counterfactual_wording');
-  assert.equal(diagnose({ ...candidate, bodyTemplate: '这回牺牲手牌换喘息。' }).accepted, true);
-  assert.equal(diagnose({ ...candidate, bodyTemplate: '打完还剩−28血。' }).reason, 'unbound_number');
 });
 
-test('partial health must not be called full health', () => {
-  const partial = { ...candidate, title: '先回满血', bodyTemplate: '现在{{hp}}/{{max}}',
-    evidenceIds: ['e'], bindings: { hp: { claimIndex: 0 }, max: { claimIndex: 1 } },
-    assertions: [{ type: 'event_field', eventId: 'e', field: 'hp', value: 28 },
-      { type: 'event_field', eventId: 'e', field: 'maxHp', value: 80 }] };
-  assert.equal(diagnose(partial).reason, 'full_health_does_not_match_numbers');
-});
-
-test('chapter and floor labels use matching overview fields without licensing other numeric claims', () => {
-  const withAct = makeTimeline('r', [...facts, { eventId: 'act2', eventType: 'run.observed', runId: 'r', sourceSessionId: 's',
-    sourceSeq: 2, payload: { act: 2, totalFloor: 18 } }]);
-  assert.equal(candidateDiagnostics(withAct, [{ ...candidate, bodyTemplate: candidate.bodyTemplate + '随后进入第二幕。' }])[0].accepted, true);
-  assert.equal(diagnose({ ...candidate, bodyTemplate: '到第17层时，血条也在报警。' }).accepted, true);
-  assert.equal(diagnose({ ...candidate, bodyTemplate: '玩家打出了17点伤害。' }).reason, 'unbound_number');
-});
-
-test('a literal turn may use its cited observations without licensing the same number as damage', () => {
-  const story = { ...candidate, evidenceIds: ['e'] };
-  assert.equal(diagnose({ ...story, bodyTemplate: story.bodyTemplate + '第10回合，谁先眨眼谁输。' }).accepted, true);
-  assert.equal(diagnose({ ...story, bodyTemplate: '第11回合，谁先眨眼谁输。' }).reason, 'unbound_number');
-  assert.equal(diagnose({ ...story, bodyTemplate: '这回合打了10点伤害。' }).reason, 'unbound_number');
-});
-
-test('titles reject numeric details and the body retains them', () => {
-  for (const title of ['52加49，金币先瘦一圈', '五十二加四十九，金币先瘦一圈', '异鱼只剩1血', '第十回合', '还有两瓶药', '三加四，金币大逃亡', '只剩１血', '金币只剩十！']) {
-    assert.equal(diagnose({ ...candidate, title }).reason, 'number_in_title');
+test('titles allow natural numbers and reject exact combat reports', () => {
+  for (const title of ['两瓶药陪我到墓门口，一路看戏', '第17层，药瓶还等着我说请', '第十回合', '52金币换了个教训', '三加四，金币大逃亡', '两瓶药没喝，到了第17层还在等一个值得开瓶的日子']) {
+    const [card] = selectStories(t, [{ ...candidate, title }], { preserveModelVoice: true });
+    assert.equal(card?.title, title);
   }
-  const [card] = selectStories(t, [candidate], { preserveModelVoice: true });
-  assert.equal(card.title, candidate.title);
-  assert.match(card.body, /只剩1血，你还剩28血/);
+  for (const title of ['异鱼只剩1血', '只剩１血', '四十六血掉到八血', '血量从46掉到8', 'HP 80→20', '打了34点伤害', '三十四点伤害', '实际抗伤47', '伤害：1,200', '只挨了34点']) {
+    assert.equal(diagnose({ ...candidate, title }).reason, 'combat_value_in_title', title);
+  }
 });

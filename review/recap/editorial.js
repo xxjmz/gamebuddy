@@ -9,36 +9,14 @@ function wordingIssue(text) {
   return WORDING_ISSUES.find(([, pattern]) => pattern.test(text))?.[0];
 }
 
-const CHINESE_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
-const CHINESE_UNITS = { 十: 10, 百: 100, 千: 1000 };
+const TITLE_QUANTITY = String.raw`[+−-]?(?:\d+(?:,\d{3})*(?:\.\d+)?|[零〇一二两三四五六七八九十百千万亿]+)`;
+const COMBAT_VALUE_WITH_UNIT = new RegExp(String.raw`${TITLE_QUANTITY}\s*(?:点\s*)?(?:血量|生命值|生命|HP\b|血(?!条|线|瓶|战|族)|伤害|输出|抗伤|格挡|护盾|治疗|掉血|回血)`, 'iu');
+const COMBAT_VALUE_AFTER_LABEL = new RegExp(String.raw`(?:血量|生命值|HP|血条|血线|伤害|输出|抗伤|格挡|护盾|治疗量)\s*(?:从|由|只剩|剩下?|掉到|降到|回到|升到|达到|高达|是|为|[:=])?\s*${TITLE_QUANTITY}(?=$|[\s\p{P}%点血掉降升回剩到→])`, 'iu');
+const COMBAT_POINTS_AFTER_ACTION = new RegExp(String.raw`(?:打了|打出|造成|受到|挨了|扛了|挡了|掉了|扣了|回了)\s*${TITLE_QUANTITY}\s*点(?!钟)`, 'u');
 
-function numberValue(text) {
-  if (/^[+−-]?\d/.test(text)) return String(Number(text.replace('−', '-')));
-  let total = 0, digit = 0;
-  for (const character of text) {
-    if (Object.hasOwn(CHINESE_DIGITS, character)) digit = CHINESE_DIGITS[character];
-    else {
-      total += (digit || 1) * CHINESE_UNITS[character];
-      digit = 0;
-    }
-  }
-  return String(total + digit);
-}
-
-function narrativeNumbers(text) {
-  const literal = text.replace(/下一场|这一场|这一次|那一次|最后一击|这一回合/g, '');
-  return [
-    ...(literal.match(/(?<!\d)[+−-]?\d+(?:\.\d+)?/g) || []).map(numberValue),
-    ...[...literal.matchAll(/([零〇一二两三四五六七八九十百千]+)(?:回合|场|次|点|血|层|张|刀|击|幕|章)/g)].map(match => numberValue(match[1]))
-  ];
-}
-
-const TITLE_CHINESE_NUMBER = /[零〇一二两三四五六七八九十百千万亿]{2,}|[零〇一二两三四五六七八九十百千万亿](?:金币|块|费|瓶|枚|只|成|折|秒|分钟)|第[零〇一二两三四五六七八九十百千万亿]|(?:剩|差|花了|赚了)[零〇一二两三四五六七八九十百千万亿](?=$|[\s\p{P}])/u;
-const TITLE_ARITHMETIC = /[零〇一二两三四五六七八九十百千万亿]\s*[+×÷/加减乘]\s*[零〇一二两三四五六七八九十百千万亿]/u;
-
-function titleHasNumber(title) {
+function titleReportsCombatValue(title) {
   const text = title.normalize('NFKC');
-  return /\p{N}/u.test(title) || narrativeNumbers(text).length > 0 || TITLE_CHINESE_NUMBER.test(text) || TITLE_ARITHMETIC.test(text);
+  return COMBAT_VALUE_WITH_UNIT.test(text) || COMBAT_VALUE_AFTER_LABEL.test(text) || COMBAT_POINTS_AFTER_ACTION.test(text);
 }
 
 const MIN_INTEREST_SCORE = 2;
@@ -71,4 +49,4 @@ async function scoreCardInterest(timeline, cards, complete) {
   });
 }
 
-module.exports = { wordingIssue, numberValue, narrativeNumbers, titleHasNumber, MIN_INTEREST_SCORE, INTEREST_PROMPT, scoreCardInterest };
+module.exports = { wordingIssue, titleReportsCombatValue, MIN_INTEREST_SCORE, INTEREST_PROMPT, scoreCardInterest };

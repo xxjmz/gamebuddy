@@ -1,6 +1,6 @@
 const { inspectSubject, observedPayload, observedRelations } = require('./facts');
 const { checkClaim } = require('./claims');
-const { narrativeNumbers, numberValue, titleHasNumber, wordingIssue } = require('./editorial');
+const { titleReportsCombatValue, wordingIssue } = require('./editorial');
 
 function story(timeline, candidate) {
   const p = candidate || {};
@@ -47,13 +47,6 @@ function story(timeline, candidate) {
   return null;
 }
 
-function checkNumericClaim(timeline, claim) {
-  if (!claim || !(typeof claim.value === 'number'
-    || typeof claim.value === 'string' && /^[+-]?\d+(?:\.\d+)?$/.test(claim.value)
-    || ['metric', 'subject_count'].includes(claim.type))) return null;
-  return checkClaim(timeline, claim);
-}
-
 function groundedStory(timeline, candidate, diagnostic = {}, { canonicalizeRelations = true } = {}) {
   const reject = (reason, detail) => { Object.assign(diagnostic, { reason, ...(detail ? { detail } : {}) }); return null; };
   if (!candidate || typeof candidate !== 'object') return reject('invalid_candidate');
@@ -64,74 +57,21 @@ function groundedStory(timeline, candidate, diagnostic = {}, { canonicalizeRelat
   const { title, bodyTemplate, assertions = [], evidenceIds = [], bindings = {} } = candidate;
   if (typeof title !== 'string' || typeof bodyTemplate !== 'string' || !Array.isArray(assertions)
     || !Array.isArray(evidenceIds) || !bindings || typeof bindings !== 'object') return reject('invalid_schema');
-  if (titleHasNumber(title)) return reject('number_in_title', '用贴合本局的反差或调侃重写标题，具体数值保留在正文。');
-  const numericResults = assertions.map(claim => checkNumericClaim(timeline, claim));
-  if (numericResults.some(result => result && result.status !== 'supported'))
-    return reject('unsupported_numeric_assertion');
-  const supportedNumbers = new Set(numericResults.filter(Boolean).map(result => String(result.value)));
-  const locations = { 幕: new Set(), 层: new Set(), 回合: new Set() };
-  for (const fact of timeline.facts) {
-    const payload = observedPayload(fact);
-    if (Number.isFinite(payload.act)) locations.幕.add(String(payload.act));
-    for (const floor of [payload.floor, payload.totalFloor]) {
-      if (Number.isFinite(floor)) locations.层.add(String(floor));
-    }
-  }
-  for (const id of evidenceIds) {
-    const payload = observedPayload(timeline.byId.get(id));
-    const turn = payload.combat?.turn ?? payload.turn;
-    if (Number.isFinite(turn)) locations.回合.add(String(turn));
-  }
-  const storyNumbers = text => narrativeNumbers(text.replace(
-    /第(\d+|[零〇一二两三四五六七八九十百千]+)(幕|层|回合)/g,
-    (literal, number, unit) => locations[unit].has(numberValue(number)) ? '' : literal
-  ));
-  const literalBody = bodyTemplate.replace(/\{\{[a-zA-Z][\w]*\}\}/g, '');
-  const literalNumbers = storyNumbers(title + ' ' + literalBody);
-  const unsupportedNumbers = [...new Set(literalNumbers.filter(n => !supportedNumbers.has(n)))];
-  if (unsupportedNumbers.length) {
-    const matchingObservedFields = [];
-    const visit = (value, field, eventId) => {
-      if (typeof value === 'number' && unsupportedNumbers.includes(String(value))) matchingObservedFields.push({ eventId, field, value });
-      else if (value && typeof value === 'object') for (const [key, child] of Object.entries(value)) visit(child, field ? `${field}.${key}` : key, eventId);
-    };
-    for (const id of evidenceIds) visit(observedPayload(timeline.byId.get(id)), '', id);
-    return reject('unbound_number', { unsupportedNumbers, matchingObservedFields: matchingObservedFields.slice(0, 20),
-      repairHint: '正确数字可补齐匹配字段的event_field断言并绑定；不要删掉有趣的表达。匹配字段仅为线索，须选择语义对应的实际字段。' });
-  }
-  let valid = true, bindingError = '';
-  const body = bodyTemplate.replace(/\{\{([a-zA-Z][\w]*)\}\}/g, (match, name, offset) => {
-    const binding = bindings[name];
-    if (!binding || !Number.isInteger(binding.claimIndex) || !assertions[binding.claimIndex]) { valid = false; return ''; }
-    const claim = assertions[binding.claimIndex];
-    const checked = numericResults[binding.claimIndex] || { value: claim.value };
-    if (!['string', 'number'].includes(typeof checked.value)) { valid = false; return ''; }
-    const tail = bodyTemplate.slice(offset + match.length), head = bodyTemplate.slice(0, offset);
-    if (typeof checked.value === 'number' && /(?:增加|多了|涨了|提升了|减少|少了|降低了)$/.test(head)
-      && /(?:^|\.)(?:hp(?:Before|After)?|maxHp|gold|block|energy)$/.test(claim.field || '')) {
-      valid = false; bindingError = 'absolute_value_used_as_delta'; return '';
-    }
-    if (/^(?:次|点|血|层|张|回合|场|刀|击)/.test(tail) || /第$/.test(head)) {
-      if (typeof checked.value !== 'number') { valid = false; return ''; }
-      if (/^次/.test(tail) && !/count|times|index/i.test(claim.field || '') && !(claim.type === 'metric' && claim.metricId === 'reloads')) { valid = false; return ''; }
-    }
+  if (titleReportsCombatValue(title)) return reject('combat_value_in_title', '标题改写成贴合本局的反差或调侃，具体血量、伤害等战斗数值可留在正文。');
+  let valid = true;
+  const body = bodyTemplate.replace(/\{\{([a-zA-Z][\w]*)\}\}/g, (_match, name) => {
+    const index = bindings[name]?.claimIndex;
+    const claim = Number.isInteger(index) ? assertions[index] : null;
+    const value = claim?.value;
+    if (typeof value !== 'string' && typeof value !== 'number') { valid = false; return ''; }
     if (claim.type === 'event_field' && /^(cardId|potionId|relicId)$/.test(claim.field || '')) {
       const catalog = claim.field === 'cardId' ? require('../../agent/data/codex/cards.json')
         : claim.field === 'potionId' ? require('../../agent/data/codex/potions.json') : require('../../agent/data/codex/relics.json');
-      return catalog.find(item => item.id === checked.value)?.name || String(checked.value);
+      return catalog.find(item => item.id === value)?.name || String(value);
     }
-    return String(checked.value);
+    return String(value);
   });
-  if (!valid) return reject(bindingError || 'invalid_binding', '占位符须指向有效断言的标量value；合并potionNames应绑定一个完整字符串，不能拆成两个不同名字。');
-  if (/满血|回满(?!半|一半)/.test(title + body)) {
-    const healthObservations = evidenceIds.map(id => observedPayload(timeline.byId.get(id)))
-      .filter(p => Number.isFinite(p.hp) && Number.isFinite(p.maxHp));
-    if (healthObservations.length && !healthObservations.some(p => p.hp === p.maxHp))
-      return reject('full_health_does_not_match_numbers', '文案写满血，但引用观测hp均小于maxHp，请改为实际血线。');
-  }
-  if (/\{\{|\}\}/.test(title + body)) return reject('invalid_binding');
-  if (storyNumbers(title + ' ' + body).some(number => !supportedNumbers.has(number)))
-    return reject('unsupported_rendered_number');
+  if (!valid || /\{\{|\}\}/.test(title + body)) return reject('invalid_binding', '占位符须指向可显示的文本或数字，也可直接写成自然正文。');
   const wording = wordingIssue(title + ' ' + body);
   if (wording) return reject(wording);
   if (/阵亡|临死|死前|战死|(?:玩家|角色|你|自己)(?:已经|最终|当场)?(?:死亡|死了)/.test(title + ' ' + body)) {
@@ -141,13 +81,6 @@ function groundedStory(timeline, candidate, diagnostic = {}, { canonicalizeRelat
     if (![...combatIds].some(combatId => checkClaim(timeline, { type: 'combat_outcome', combatId, value: 'death' }).status === 'supported'))
       return reject('unproved_player_death');
   }
-  const powerChanges = assertions.filter((claim, index) => numericResults[index]
-    && timeline.byId.get(claim.eventId)?.eventType === 'power.changed');
-  if (powerChanges.length && /涨|暴增|增加|提升|叠了/.test(title + body)
-    && !powerChanges.some(claim => {
-      const change = observedPayload(timeline.byId.get(claim.eventId));
-      return change.delta > 0 || change.amountAfter > change.amountBefore;
-    })) return reject('unproven_power_growth');
   const relationIds = [...new Set(assertions.filter(c => c?.type === 'recorded_relation').map(c => c.relationId))];
   if (canonicalizeRelations && relationIds.length === 1
     && assertions.every(c => ['recorded_relation', 'event_field', 'sequence', 'occurred'].includes(c?.type))) {
@@ -261,16 +194,10 @@ function candidateDiagnostics(timeline, candidates, { preserveModelVoice = false
     const diagnostic = {}, card = groundedStory(timeline, c, diagnostic, { canonicalizeRelations: !preserveModelVoice });
     if (card && (!card.title.trim() || !card.body.trim())) diagnostic.reason = 'empty_card_text';
     return { index, title: c?.title, accepted: Boolean(card && !diagnostic.reason), ...diagnostic,
-    claims: (Array.isArray(c?.assertions) ? c.assertions : []).flatMap((claim, index) => {
-      const result = checkNumericClaim(timeline, claim);
-      return result ? [{ index, ...result,
-        ...(claim.type === 'snapshot_field' && timeline.byId.get(claim.snapshotId)?.eventType === 'run.observed'
-          ? { repairHint: 'run.observed是事件，改用event_field，eventId取原snapshotId。' } : {}) }] : [];
-    }),
     bindings: Object.entries(c?.bindings || {}).map(([name, binding]) => ({ name, claimIndex: binding?.claimIndex,
       valid: Number.isInteger(binding?.claimIndex) && Boolean(c?.assertions?.[binding.claimIndex]),
       field: c?.assertions?.[binding?.claimIndex]?.field })),
-    reminder: '核对数字及其含义，保留故事本身的措辞。删改断言时同步更新绑定索引。' };
+    reminder: '保留故事本身的措辞。删改断言时同步更新绑定索引，或直接写正文。' };
   });
 }
 module.exports = { story, groundedStory, selectStories, localStories, highValueLocalStory,

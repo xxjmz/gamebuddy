@@ -2,11 +2,15 @@
 
 ### Requirement: Readable recap card titles
 
-复盘卡片标题 SHALL 围绕本局看点写出逗趣的表达，MUST NOT 出现具体数值。正文 SHALL 继续按既有规则核对所用数值。
+复盘卡片标题 SHALL 围绕本局看点写出逗趣的表达。标题 MUST NOT 写具体血量、血量变化、伤害等战斗报数。自然的数量、楼层和顺序表达 SHALL 可以保留。标题 MUST NOT 设固定字数上限。
 
-#### Scenario: A title mentions a price
-- **WHEN** 卡片标题包含交易价格或其他具体数值
-- **THEN** 系统 SHALL 要求改写标题，并允许已核对的价格留在正文
+#### Scenario: A title reports exact combat values
+- **WHEN** 标题出现「血量从46掉到8」或「打了34点伤害」之类的具体战斗数值
+- **THEN** 系统 SHALL 要求改写标题，并允许这些数值留在正文
+
+#### Scenario: A title uses natural quantities
+- **WHEN** 标题包含「两瓶药」或「第17层」等数量或顺序表达
+- **THEN** 系统 MUST NOT 因这些数字或标题字数拒绝该片段
 
 #### Scenario: A good story has a flat title
 - **WHEN** 卡片故事分达到门槛，但标题没有逗趣的表达

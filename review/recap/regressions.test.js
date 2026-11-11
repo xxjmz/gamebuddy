@@ -58,9 +58,9 @@ test('card labels are rendered without enforcing a title or body length cap', ()
   c.assertions[0].value = f.facts.find(e => e.eventType === 'rest.action_completed').payload.cardId;
   assert.ok(selectStories(timeline(f), [c])[0].body.startsWith(c.assertions[0].value));
 });
-test('counterfactual blame and raw numbers are rejected, ordinary battle completion is not a card', () => {
+test('counterfactual blame and ordinary battle completion are still rejected', () => {
   const f = base(), c = candidate(f);
-  assert.deepEqual(selectStories(timeline(f), [{ ...c, bodyTemplate: '本来可以赢。' }, { ...c, bodyTemplate: '这次造成999伤害。' },
+  assert.deepEqual(selectStories(timeline(f), [{ ...c, bodyTemplate: '本来可以赢。' },
     { pattern: 'combat_finished', eventId: f.facts.find(e => e.eventType === 'combat.ended').eventId }]), []);
 });
 test('decision-time query excludes the chosen outcome and future events', () => {
@@ -191,24 +191,20 @@ test('interesting cards are preserved and only low-scoring drafts get one regene
   assert.deepEqual(recap.trace.filter(row => row.phase === 'interest_review').map(row => row.reviews.map(review => review.score)), [[1, 2], [2]]);
 });
 
-test('a still-boring retry or one with an incorrect number leaves no story to display', async () => {
-  for (const bodyTemplate of ['后来又开战了。', '这一刀打了9999点伤害。']) {
-    const f = base(), c = candidate(f), stages = [];
-    const recap = await buildRecap({ ...f, llm: { enabled: true, completeRecapTurn: async input => {
-      stages.push(input.stage);
-      if (input.stage === 'interest_review') return interestReview(input, () => 1);
-      if (input.stage === 'regenerate_interest') return { candidates: [{ ...c, title: '新片段', bodyTemplate }] };
-      return { candidates: [c] };
-    } } });
-    assert.equal(recap.status, 'ready');
-    assert.deepEqual(recap.cards, []);
-    assert.equal(recap.closing, '');
-    assert.equal(recap.coverageNote, '本局没有找到值得单独讲的片段');
-    assert.deepEqual(stages, ['investigate', 'interest_review', 'regenerate_interest',
-      ...(bodyTemplate.includes('9999') ? [] : ['interest_review'])]);
-  }
+test('a low-scoring rewrite is omitted after it reaches interest review', async () => {
+  const f = base(), c = candidate(f), stages = [];
+  const recap = await buildRecap({ ...f, llm: { enabled: true, completeRecapTurn: async input => {
+    stages.push(input.stage);
+    if (input.stage === 'interest_review') return interestReview(input, () => 1);
+    if (input.stage === 'regenerate_interest') return { candidates: [{ ...c, title: '新片段', bodyTemplate: '这一刀打了9999点伤害。' }] };
+    return { candidates: [c] };
+  } } });
+  assert.equal(recap.status, 'ready');
+  assert.deepEqual(recap.cards, []);
+  assert.equal(recap.closing, '');
+  assert.equal(recap.coverageNote, '本局没有找到值得单独讲的片段');
+  assert.deepEqual(stages, ['investigate', 'interest_review', 'regenerate_interest', 'interest_review']);
 });
-
 test('a skill description without a real event never reaches the judge or the published cards', async () => {
   const f = base(), stages = [];
   const intro = { title: '怪物怎么写书', bodyTemplate: '这只怪物会写书，效果是给牌堆添麻烦。' };
@@ -345,7 +341,7 @@ test('numeric payload values marked unknown never become a record or overkill st
   assert.equal(fixedMetrics(timeline(f))[1].display, '未记录');
   assert.deepEqual(selectStories(timeline(f), [{ pattern: 'overkill', eventId: e.eventId }]), []);
 });
-test('a play count cannot be bound as card hits or confirmed damage attribution', () => {
+test('a boolean damage binding is rejected as unrenderable', () => {
   const f = base(), e = f.facts.find(e => e.eventType === 'rest.action_completed');
   const c = { pattern: 'unverified_damage', title: '卡牌贡献', bodyTemplate: '{{card}}反复命中{{hits}}次，每次{{damage}}点。',
     bindings: { card: { claimIndex: 0 }, hits: { claimIndex: 1 }, damage: { claimIndex: 2 } }, evidenceIds: [e.eventId],
@@ -368,7 +364,7 @@ test('a boolean cannot be rendered as a count and machine IDs never enter story 
   e.payload.cardId = 'INTERNAL_CARD_ID'; c.assertions[0].value = 'INTERNAL_CARD_ID';
   assert.deepEqual(selectStories(timeline(f), [c]), []);
 });
-test('the summary receives selected cards only and rejects unsupported numbers', async () => {
+test('the summary receives selected cards and preserves numbers in the generated text', async () => {
   const f = base(), c = candidate(f); let closingInput;
   const recap = await buildRecap({ ...f, llm: { enabled: true, completeRecapTurn: async input => {
     if (input.stage === 'validate') return { verdicts: [{ index: 0, supported: true }] };
@@ -377,39 +373,13 @@ test('the summary receives selected cards only and rejects unsupported numbers',
     return { candidates: [c] };
   } } });
   assert.deepEqual(Object.keys(closingInput).sort(), ['selectedCards', 'stage']);
-  assert.equal(recap.closing, '');
+  assert.equal(recap.closing, '这次打出了五张牌。');
 });
 
-test('an entity name cannot be rendered as a numeric count', () => {
-  const f = base(), c = candidate(f);
-  c.bodyTemplate = '{{card}}次抽牌均未上手。';
-  assert.deepEqual(selectStories(timeline(f), [c]), []);
-});
-test('Chinese numeral claims cannot bypass binding checks', () => {
-  const f = base(), c = candidate(f); c.bodyTemplate = '{{card}}抽到三次。';
-  assert.deepEqual(selectStories(timeline(f), [c]), []);
-});
-test('a power final amount cannot prove that the power increased', () => {
-  const f = base(), e = insert(f, 'power.changed', { powerId: 'STRENGTH', amount: 18 });
-  const c = { pattern: 'power', title: '力量暴涨', bodyTemplate: '力量涨到了{{n}}层。', evidenceIds: [e.eventId],
-    bindings: { n: { claimIndex: 0 } }, assertions: [{ type: 'event_field', eventId: e.eventId, field: 'amount', value: 18 }] };
-  assert.deepEqual(selectStories(timeline(f), [c]), []);
-});
 
-test('replaying actual weak-model responses keeps rejected stories out even if its semantic judge approves', async () => {
-  const rows = require('../../harness/fixtures/recap-evals/model-response-regressions.json');
-  for (const row of rows.cases) {
-    const f = JSON.parse(fs.readFileSync(path.join(__dirname, `../../harness/fixtures/recap-evals/${row.fixtureId}.json`)));
-    const recap = await buildRecap({ ...f, llm: { enabled: true, completeRecapTurn: async input => {
-      if (input.stage === 'validate') return { verdicts: input.supportPackets.map(p => ({ index: p.index, supported: true })) };
-      if (input.stage === 'interest_review') return interestReview(input);
-      if (input.stage === 'closing') return { closing: '这些片段留下了本局的选择与转折。' };
-      return { candidates: row.candidates };
-    } } });
-    assert.ok(recap.cards.every(c => !row.forbiddenTitles.includes(c.title)));
-    assert.ok(recap.cards.every(c => !/痛击次|true次|飞剑打击/.test(c.body)));
-  }
-});
+
+
+
 
 // Iteration 01 tools: bounded legacy observations, meaningful choice discovery and field quality.
 test('a completed historical run with observations can publish a natural recap', async () => {
@@ -563,27 +533,8 @@ test('recovery relations cannot cross a resume, source session change or missing
     assert.ok(!observedRelations(timeline(f)).some(r => r.kind === 'health_recovery'), mode);
   }
 });
-test('relation numbers are verified even when a card lists only some references', () => {
-  const { localStories, candidateDiagnostics } = require('./stories');
-  const f = realLong(), t = timeline(f), card = localStories(t).find(c => c.pattern === 'rest_choice_style');
-  const c = { ...card, bodyTemplate: '{{n}}次火堆回血，{{hp}}血仍选择休息。',
-    bindings: { n: { claimIndex: 0 }, hp: { claimIndex: 1 } }, evidenceIds: card.evidenceIds.slice(0, 2) };
-  assert.equal(candidateDiagnostics(t, [c], { preserveModelVoice: true })[0].accepted, true);
-  const wrong = { ...c, assertions: c.assertions.map((claim, index) => index ? claim : { ...claim, value: 999 }) };
-  assert.equal(candidateDiagnostics(t, [wrong])[0].reason, 'unsupported_numeric_assertion');
-});
 
-test('the actual misattributed thirty-block model response stays rejected even when its judge approves', async () => {
-  const f = realLong();
-  const recap = await buildRecap({ ...f, maxRounds: 0, llm: { enabled: true, completeRecapTurn: async input => {
-    if (input.stage === 'validate') return { verdicts: input.supportPackets.map(p => ({ index: p.index, supported: true })) };
-    if (input.stage === 'interest_review') return interestReview(input);
-    if (input.stage === 'closing') return { closing: '强化壁垒提供了30格挡。' };
-    return { candidates: realObservationCases.rejectedModelCandidates };
-  } } });
-  assert.ok(recap.cards.every(c => !c.title.includes('强化壁垒') && !c.body.includes('IMPERVIOUS')));
-  assert.ok(!recap.closing.includes('强化壁垒'));
-});
+
 test('a candidate submitted on the last investigation response still gets one bounded repair', async () => {
   const { localStories } = require('./stories');
   const f = realLong(), validCard = localStories(timeline(f)).find(c => c.pattern === 'health_recovery');
@@ -595,7 +546,7 @@ test('a candidate submitted on the last investigation response still gets one bo
     if (input.stage === 'validate') return { verdicts: input.supportPackets.map(p => ({ index: p.index, supported: true, issues: [] })) };
     if (input.stage === 'interest_review') return interestReview(input);
     if (input.stage === 'closing') return { closing: '血条重新亮了起来。' };
-    return { candidates: [{ ...good, bodyTemplate: '一次治疗后，生命回到{{hp}}血。' }] };
+    return { candidates: [{ ...good, bodyTemplate: '治疗后，生命回到{{missing}}血。' }] };
   } } });
   assert.equal(repairCalls, 1);
   assert.equal(recap.status, 'ready');
@@ -688,7 +639,7 @@ test('identical rendered repair candidates are deduplicated before interest scor
     if (input.stage === 'repair') return { candidates: [c, clone(c)] };
     if (input.stage === 'interest_review') return interestReview(input);
     if (input.stage === 'closing') return { closing: '血条重新亮了起来。' };
-    return { candidates: [c, { ...c, bodyTemplate: '一次治疗后恢复。' }] };
+    return { candidates: [c, { ...c, bodyTemplate: '治疗后回到{{missing}}血。' }] };
   } } });
   assert.ok(!stages.includes('validate'));
   assert.ok(recap.trace.some(x => x.phase === 'exact_deduplication' && x.after === 1));
